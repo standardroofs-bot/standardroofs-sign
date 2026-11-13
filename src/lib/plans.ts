@@ -99,3 +99,4 @@ export function hasExceededStorageLimit(
   const limit = BigInt(storageLimitBytes);
   return used + add > limit;
 }
+

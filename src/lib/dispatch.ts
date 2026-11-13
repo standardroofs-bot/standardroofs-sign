@@ -26,7 +26,7 @@ export function buildShortMessage(params: {
   documentTitle: string;
   signUrl: string;
 }) {
-  return `Hello ${params.signerName}, ${params.companyName} sent "${params.documentTitle}" for your signature. Open & sign here: ${params.signUrl}`;
+  return `Hello ${params.signerName}, ${params.companyName} sent "${params.documentTitle}" for your electronic signature. Review & sign here: ${params.signUrl}`;
 }
 
 export function normalizeWhatsAppDigits(phone: string): string {
@@ -60,7 +60,7 @@ async function getSmtpTransport() {
   const from =
     settings?.smtpFrom ||
     process.env.SMTP_FROM ||
-    `${settings?.companyName || "Standard Roofs"} <info@standardroofs.in>`;
+    `${settings?.companyName || "Standard e-Sign"} <noreply@standardesign.in>`;
 
   return { settings, host, port, user, pass, from };
 }
@@ -69,7 +69,7 @@ export async function dispatchInvite(
   target: DispatchTarget
 ): Promise<DispatchResult> {
   const { settings, host, port, user, pass, from } = await getSmtpTransport();
-  const companyName = settings?.companyName || "Standard Roofs";
+  const companyName = settings?.companyName || "Standard e-Sign";
   const textBody = buildShortMessage({
     signerName: target.name,
     companyName,
@@ -89,7 +89,7 @@ export async function dispatchInvite(
     },
   };
 
-  // 1. EMAIL
+  // 1. EMAIL DISPATCH (Custom SMTP)
   if (target.channels.includes("EMAIL") && target.email) {
     if (host && user && pass) {
       try {
@@ -112,7 +112,7 @@ export async function dispatchInvite(
               <div style="padding:24px;background:#ffffff;color:#0f172a;">
                 <p style="margin-top:0;">Hello <strong>${target.name}</strong>,</p>
                 <p>Please review and sign: <strong>${target.documentTitle}</strong></p>
-                ${target.message ? `<p style="color:#475569;font-size:14px;">${target.message}</p>` : ""}
+                ${target.message ? `<p style="color:#475569;font-size:14px;background:#f8fafc;padding:12px;border-radius:8px;">${target.message}</p>` : ""}
                 <div style="margin:24px 0;">
                   <a href="${target.signUrl}" style="display:inline-block;background:#991b1b;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 24px;border-radius:8px;">
                     Review &amp; Sign Document
@@ -130,41 +130,98 @@ export async function dispatchInvite(
         };
       }
     } else {
-      result.email = { sent: false, reason: "SMTP not configured in Settings" };
+      result.email = { sent: false, reason: "SMTP not configured" };
     }
   }
 
-  // 2. WHATSAPP WEBHOOK (optional automatic API)
-  if (
-    target.channels.includes("WHATSAPP") &&
-    target.phone &&
-    settings?.whatsappWebhookUrl
-  ) {
-    try {
-      const resp = await fetch(settings.whatsappWebhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          channel: "whatsapp",
-          phone: target.phone,
-          name: target.name,
-          documentTitle: target.documentTitle,
-          signUrl: target.signUrl,
-          message: textBody,
-        }),
-      });
-      result.whatsapp.autoSent = resp.ok;
-      if (!resp.ok) result.whatsapp.reason = `Webhook HTTP ${resp.status}`;
-    } catch (err) {
-      result.whatsapp.reason =
-        err instanceof Error ? err.message : "WhatsApp webhook failed";
+  // 2. WHATSAPP AUTOMATED DISPATCH (Meta Cloud API / AiSensy / Webhook)
+  if (target.channels.includes("WHATSAPP") && target.phone) {
+    const waToken = process.env.WHATSAPP_API_TOKEN || process.env.WHATSAPP_CLOUD_API_TOKEN;
+    const waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const cleanDigits = normalizeWhatsAppDigits(target.phone);
+
+    // 2A. Meta WhatsApp Cloud API
+    if (waToken && waPhoneId && cleanDigits) {
+      try {
+        const resp = await fetch(
+          `https://graph.facebook.com/v19.0/${waPhoneId}/messages`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${waToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              to: cleanDigits,
+              type: "text",
+              text: { body: textBody },
+            }),
+          }
+        );
+        result.whatsapp.autoSent = resp.ok;
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          result.whatsapp.reason = errData?.error?.message || `WhatsApp HTTP ${resp.status}`;
+        }
+      } catch (err) {
+        result.whatsapp.reason = err instanceof Error ? err.message : "WhatsApp Cloud API error";
+      }
+    } else if (settings?.whatsappWebhookUrl) {
+      // 2B. Generic Webhook (e.g. AiSensy / Wati)
+      try {
+        const resp = await fetch(settings.whatsappWebhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            channel: "whatsapp",
+            phone: target.phone,
+            name: target.name,
+            documentTitle: target.documentTitle,
+            signUrl: target.signUrl,
+            message: textBody,
+          }),
+        });
+        result.whatsapp.autoSent = resp.ok;
+      } catch (err) {
+        result.whatsapp.reason = err instanceof Error ? err.message : "WhatsApp webhook failed";
+      }
     }
   }
 
-  // 3. SMS (Fast2SMS or custom SMS webhook)
+  // 3. SMS AUTOMATED DISPATCH (MSG91 or Fast2SMS)
   if (target.channels.includes("SMS") && target.phone) {
     const clean10 = target.phone.replace(/\D/g, "").slice(-10);
-    if (settings?.fast2smsApiKey && clean10.length === 10) {
+    const msg91Auth = process.env.MSG91_AUTH_KEY;
+    const msg91Template = process.env.MSG91_TEMPLATE_ID;
+
+    // 3A. MSG91 Flow API
+    if (msg91Auth && msg91Template && clean10.length === 10) {
+      try {
+        const resp = await fetch("https://control.msg91.com/api/v5/flow/", {
+          method: "POST",
+          headers: {
+            authkey: msg91Auth,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            template_id: msg91Template,
+            recipients: [
+              {
+                mobiles: `91${clean10}`,
+                name: target.name,
+                doc_title: target.documentTitle,
+                sign_url: target.signUrl,
+              },
+            ],
+          }),
+        });
+        result.sms.autoSent = resp.ok;
+      } catch (err) {
+        result.sms.reason = err instanceof Error ? err.message : "MSG91 dispatch error";
+      }
+    } else if (settings?.fast2smsApiKey && clean10.length === 10) {
+      // 3B. Fast2SMS API
       try {
         const resp = await fetch("https://www.fast2sms.com/dev/bulkV2", {
           method: "POST",
@@ -179,30 +236,8 @@ export async function dispatchInvite(
           }),
         });
         result.sms.autoSent = resp.ok;
-        if (!resp.ok) result.sms.reason = `Fast2SMS HTTP ${resp.status}`;
       } catch (err) {
-        result.sms.reason =
-          err instanceof Error ? err.message : "Fast2SMS request failed";
-      }
-    } else if (settings?.smsWebhookUrl) {
-      try {
-        const resp = await fetch(settings.smsWebhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            channel: "sms",
-            phone: target.phone,
-            name: target.name,
-            documentTitle: target.documentTitle,
-            signUrl: target.signUrl,
-            message: textBody,
-          }),
-        });
-        result.sms.autoSent = resp.ok;
-        if (!resp.ok) result.sms.reason = `SMS webhook HTTP ${resp.status}`;
-      } catch (err) {
-        result.sms.reason =
-          err instanceof Error ? err.message : "SMS webhook failed";
+        result.sms.reason = err instanceof Error ? err.message : "Fast2SMS dispatch error";
       }
     }
   }
@@ -212,18 +247,14 @@ export async function dispatchInvite(
 
 export async function sendCompletedCopiesEmail(params: {
   documentTitle: string;
-  recipientEmails: string[];
+  projectName: string;
+  recipients: { name: string; email: string }[];
   pdfBuffer: Buffer;
-}) {
+}): Promise<void> {
   const { settings, host, port, user, pass, from } = await getSmtpTransport();
   if (!host || !user || !pass) return;
 
-  const adminEmail = settings?.email || "";
-  const allTargets = Array.from(
-    new Set([...params.recipientEmails.filter(Boolean), adminEmail].filter(Boolean))
-  );
-  if (allTargets.length === 0) return;
-
+  const companyName = settings?.companyName || "Standard e-Sign";
   const transporter = nodemailer.createTransport({
     host,
     port,
@@ -231,20 +262,39 @@ export async function sendCompletedCopiesEmail(params: {
     auth: { user, pass },
   });
 
-  const safeFilename =
-    params.documentTitle.replace(/[^a-zA-Z0-9_-]/g, "_") + "-SIGNED.pdf";
+  const safeTitle = params.documentTitle.replace(/[^a-zA-Z0-9_-]/g, "_");
 
-  await transporter.sendMail({
-    from,
-    to: allTargets.join(", "),
-    subject: `Completed & Signed: ${params.documentTitle}`,
-    html: `<p>All parties have completed signing <strong>${params.documentTitle}</strong>. The finalized PDF with the Audit Certificate is attached for your records.</p>`,
-    attachments: [
-      {
-        filename: safeFilename,
-        content: params.pdfBuffer,
-        contentType: "application/pdf",
-      },
-    ],
-  });
+  for (const r of params.recipients) {
+    if (!r.email) continue;
+    try {
+      await transporter.sendMail({
+        from,
+        to: r.email,
+        subject: `Completed Copy: ${params.documentTitle} (Signed & Sealed)`,
+        html: `
+          <div style="font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+            <div style="background:#0f172a;padding:20px 24px;border-bottom:4px solid #16a34a;">
+              <h1 style="margin:0;color:#ffffff;font-size:20px;">${companyName}</h1>
+              <p style="margin:4px 0 0;color:#86efac;font-size:13px;">Document Execution Completed</p>
+            </div>
+            <div style="padding:24px;background:#ffffff;color:#0f172a;">
+              <p style="margin-top:0;">Hello <strong>${r.name}</strong>,</p>
+              <p>All signers have electronically signed and verified <strong>"${params.documentTitle}"</strong>.</p>
+              <p style="font-size:14px;color:#475569;">
+                The finalized document with embedded signatures, photo/location audit certificates, and cryptographic SHA-256 seal is attached to this email.
+              </p>
+            </div>
+          </div>`,
+        attachments: [
+          {
+            filename: `${safeTitle}_Signed_Sealed.pdf`,
+            content: params.pdfBuffer,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+    } catch (err) {
+      console.error(`Failed to send completed email to ${r.email}:`, err);
+    }
+  }
 }

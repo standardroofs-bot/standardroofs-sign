@@ -19,6 +19,8 @@ model Organization {
   address                String             @default("")
   accentColor            String             @default("#991B1B")
   publicBaseUrl          String             @default("")
+  accountType            String             @default("BUSINESS") // INDIVIDUAL | BUSINESS
+  gstin                  String             @default("")
   
   // Plan & Quota Tracking
   planTier               String             @default("FREE") // FREE | PRO | ENTERPRISE
@@ -45,6 +47,10 @@ model Organization {
   whatsappWebhookUrl     String             @default("")
   smsWebhookUrl          String             @default("")
   fast2smsApiKey         String             @default("")
+  whatsappApiToken       String             @default("")
+  whatsappPhoneNumberId String             @default("")
+  msg91AuthKey           String             @default("")
+  msg91TemplateId        String             @default("")
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
@@ -101,6 +107,10 @@ model CompanySettings {
   whatsappWebhookUrl String   @default("")
   smsWebhookUrl      String   @default("")
   fast2smsApiKey     String   @default("")
+  whatsappApiToken   String   @default("")
+  whatsappPhoneNumberId String @default("")
+  msg91AuthKey       String   @default("")
+  msg91TemplateId    String   @default("")
   updatedAt          DateTime @updatedAt
 }
 
@@ -151,6 +161,8 @@ model SignatureRequest {
   createdBy            User         @relation(fields: [createdById], references: [id])
   signers              Signer[]
   auditEvents          AuditEvent[]
+  expiresAt            DateTime?
+  lastReminderAt       DateTime?
   createdAt            DateTime     @default(now())
   completedAt          DateTime?
 

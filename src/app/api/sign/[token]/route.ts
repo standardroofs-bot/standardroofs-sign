@@ -299,7 +299,8 @@ export async function POST(
 
     await sendCompletedCopiesEmail({
       documentTitle: signer.request.title,
-      recipientEmails: updatedSigners.map((s) => s.email),
+      projectName: signer.request.projectName || "",
+      recipients: updatedSigners.map((s) => ({ name: s.name, email: s.email })),
       pdfBuffer: finalizedBuffer,
     }).catch(() => {});
   } else {

@@ -167,6 +167,60 @@ export default function DashboardClient({
         </div>
       </div>
 
+      {/* 3-Step Quickstart Workflow Banner */}
+      <div className="bg-gradient-to-r from-slate-900 to-slate-950 p-5 rounded-2xl border border-slate-800 text-white shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <h2 className="text-sm font-bold tracking-wide uppercase text-slate-200">
+              Commercial e-Sign Quickstart (3 Steps)
+            </h2>
+          </div>
+          <span className="text-xs text-slate-400 font-medium">Ready in under 2 minutes</span>
+        </div>
+
+        <div className="grid sm:grid-cols-3 gap-3 pt-1">
+          <Link
+            href="/templates"
+            className="p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition group"
+          >
+            <div className="text-xs font-bold text-red-400">Step 1</div>
+            <div className="text-sm font-bold text-white mt-0.5 group-hover:text-red-300">
+              Upload Document →
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Upload any PDF, Word (.docx), or Excel (.xlsx) file.
+            </div>
+          </Link>
+
+          <Link
+            href="/templates"
+            className="p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition group"
+          >
+            <div className="text-xs font-bold text-blue-400">Step 2</div>
+            <div className="text-sm font-bold text-white mt-0.5 group-hover:text-blue-300">
+              Tag Fields &amp; Proof →
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              Drag signature, initials, date, and Sign-on-Selfie proof boxes.
+            </div>
+          </Link>
+
+          <Link
+            href="/requests/new"
+            className="p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition group"
+          >
+            <div className="text-xs font-bold text-emerald-400">Step 3</div>
+            <div className="text-sm font-bold text-white mt-0.5 group-hover:text-emerald-300">
+              Send via WhatsApp &amp; SMS →
+            </div>
+            <div className="text-xs text-slate-400 mt-1">
+              1-click direct link or automated background dispatch.
+            </div>
+          </Link>
+        </div>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-2xl border border-slate-200">
