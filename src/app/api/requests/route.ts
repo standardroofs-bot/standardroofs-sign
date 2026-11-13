@@ -62,6 +62,56 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Template not found." }, { status: 404 });
     }
 
+    const org = await prisma.organization.findUnique({
+      where: { id: user.activeOrg.id },
+    });
+    if (!org) {
+      return NextResponse.json({ error: "Organization not found." }, { status: 404 });
+    }
+
+    const mode = body.mode === "BULK" ? "BULK" : "SINGLE";
+    const requestsToCreateCount = mode === "BULK" && Array.isArray(body.bulkRecipients)
+      ? Math.max(1, body.bulkRecipients.length)
+      : 1;
+
+    // Check & Enforce Monthly Document Limits (Free Tier = 10 docs/mo)
+    const now = new Date();
+    let currentDocsSent = org.docsSentThisMonth ?? 0;
+    if (org.billingCycleResetAt && now > org.billingCycleResetAt) {
+      currentDocsSent = 0;
+      const nextMonth = new Date(now);
+      nextMonth.setMonth(nextMonth.getMonth() + 1);
+      await prisma.organization.update({
+        where: { id: org.id },
+        data: { docsSentThisMonth: 0, billingCycleResetAt: nextMonth },
+      });
+    }
+
+    const monthlyCap = org.monthlyDocLimit ?? 10;
+    if (monthlyCap !== -1 && currentDocsSent + requestsToCreateCount > monthlyCap) {
+      return NextResponse.json(
+        {
+          error: `Monthly limit reached (${currentDocsSent}/${monthlyCap} documents used). Upgrade to Business Pro for unlimited documents.`,
+          code: "DOC_LIMIT_EXCEEDED",
+        },
+        { status: 403 }
+      );
+    }
+
+    // Check & Enforce Storage Quotas
+    const storageUsed = org.storageUsedBytes ?? BigInt(0);
+    const storageLimit = org.storageLimitBytes ?? org.storageQuotaBytes ?? BigInt(1073741824);
+    const estimatedNewBytes = BigInt(template.fileSizeBytes || 50000) * BigInt(requestsToCreateCount);
+    if (storageUsed + estimatedNewBytes > storageLimit) {
+      return NextResponse.json(
+        {
+          error: "Cloud Drive storage quota exceeded. Upgrade your plan to send additional documents.",
+          code: "STORAGE_LIMIT_EXCEEDED",
+        },
+        { status: 403 }
+      );
+    }
+
     const title = String(body.title || template.name).trim();
     const projectName = String(body.projectName || "").trim();
     const category = String(body.category || template.category || "GENERAL");
@@ -71,7 +121,6 @@ export async function POST(req: Request) {
     const channels: string[] = Array.isArray(body.channels) && body.channels.length > 0
       ? body.channels.map(String)
       : ["WHATSAPP", "EMAIL", "SMS"];
-    const mode = body.mode === "BULK" ? "BULK" : "SINGLE";
 
     const settings = await prisma.companySettings.findUnique({
       where: { id: "default" },
@@ -191,6 +240,16 @@ export async function POST(req: Request) {
         );
       }
 
+      // Update Organization quota tracking
+      const totalBytes = createdRequests.reduce((acc, curr) => acc + (curr.request.fileSizeBytes || 0), 0);
+      await prisma.organization.update({
+        where: { id: org.id },
+        data: {
+          docsSentThisMonth: { increment: createdRequests.length },
+          storageUsedBytes: { increment: totalBytes },
+        },
+      });
+
       return NextResponse.json(
         {
           mode: "BULK",
@@ -306,6 +365,15 @@ export async function POST(req: Request) {
         dispatch,
       });
     }
+
+    // Update Organization quota tracking
+    await prisma.organization.update({
+      where: { id: org.id },
+      data: {
+        docsSentThisMonth: { increment: 1 },
+        storageUsedBytes: { increment: created.fileSizeBytes || 0 },
+      },
+    });
 
     return NextResponse.json(
       { mode: "SINGLE", request: created, dispatchResults },

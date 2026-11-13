@@ -40,6 +40,7 @@ export interface SignerAuditInfo {
   phone: string;
   signedAt: Date | null;
   ipAddress: string | null;
+  userAgent?: string | null;
   photoDataUrl?: string | null;
   latitude?: number | null;
   longitude?: number | null;
@@ -262,59 +263,79 @@ export async function applySignaturesAndFinalizePdf(
   y -= 20;
 
   for (const signer of input.signers) {
-    if (y < 110) break;
+    if (y < 120) break;
     const hasPhoto = Boolean(signer.photoDataUrl);
-    const boxH = hasPhoto ? 86 : 68;
+    const boxH = hasPhoto ? 104 : 74;
     certPage.drawRectangle({
       x: 40,
       y: y - boxH + 12,
       width: cw - 80,
       height: boxH,
       color: rgb(0.97, 0.98, 0.99),
-      borderColor: rgb(0.88, 0.9, 0.94),
+      borderColor: rgb(0.85, 0.88, 0.93),
       borderWidth: 1,
     });
+
+    const maxTextW = hasPhoto ? cw - 200 : cw - 100;
+
     certPage.drawText(`${signer.role}: ${signer.name}`, {
       x: 52,
-      y: y - 6,
-      size: 10.5,
+      y: y - 5,
+      size: 11,
       font: helveticaBold,
       color: rgb(0.06, 0.09, 0.16),
     });
+
     certPage.drawText(
       `Email: ${signer.email || "N/A"}${signer.phone ? `  |  Phone: ${signer.phone}` : ""}`,
       {
         x: 52,
-        y: y - 24,
+        y: y - 22,
         size: 9,
         font: helvetica,
         color: rgb(0.3, 0.35, 0.42),
       }
     );
+
     certPage.drawText(
-      `Signed: ${signer.signedAt ? signer.signedAt.toISOString() : "Pending"}  |  IP: ${signer.ipAddress || "N/A"}`,
+      `Signed: ${signer.signedAt ? signer.signedAt.toISOString() : "Pending"}  |  IP: ${signer.ipAddress || "127.0.0.1"}`,
       {
         x: 52,
-        y: y - 40,
-        size: 9,
+        y: y - 37,
+        size: 8.5,
         font: helvetica,
         color: rgb(0.08, 0.48, 0.28),
       }
     );
-    if (signer.latitude != null && signer.longitude != null) {
+
+    if (signer.userAgent) {
       certPage.drawText(
-        `GPS Location: ${signer.latitude.toFixed(6)}, ${signer.longitude.toFixed(6)}${
-          signer.locationLabel ? ` (${signer.locationLabel.slice(0, 42)})` : ""
-        }`,
+        `Device / UA: ${signer.userAgent.slice(0, 68)}`,
         {
           x: 52,
-          y: y - 56,
-          size: 8.5,
-          font: helveticaBold,
-          color: rgb(0.6, 0.11, 0.11),
+          y: y - 51,
+          size: 7.5,
+          font: helvetica,
+          color: rgb(0.4, 0.45, 0.52),
         }
       );
     }
+
+    if (signer.latitude != null && signer.longitude != null) {
+      certPage.drawText(
+        `GPS Locked: ${signer.latitude.toFixed(6)}, ${signer.longitude.toFixed(6)}${
+          signer.locationLabel ? ` (${signer.locationLabel.slice(0, 36)})` : ""
+        }`,
+        {
+          x: 52,
+          y: y - (signer.userAgent ? 65 : 53),
+          size: 8.5,
+          font: helveticaBold,
+          color: rgb(0.65, 0.12, 0.12),
+        }
+      );
+    }
+
     if (signer.photoDataUrl) {
       const parsedPhoto = parseDataUrlImage(signer.photoDataUrl);
       if (parsedPhoto) {
@@ -323,22 +344,47 @@ export async function applySignaturesAndFinalizePdf(
             parsedPhoto.mime === "image/png"
               ? await pdfDoc.embedPng(parsedPhoto.bytes)
               : await pdfDoc.embedJpg(parsedPhoto.bytes);
+
+          const photoDim = 88;
+          const photoX = cw - 40 - photoDim - 10;
+          const photoY = y - boxH + 18;
+
+          // Border frame around selfie proof
+          certPage.drawRectangle({
+            x: photoX - 2,
+            y: photoY - 2,
+            width: photoDim + 4,
+            height: photoDim + 4,
+            color: rgb(1, 1, 1),
+            borderColor: rgb(0.76, 0.25, 0.05),
+            borderWidth: 1.5,
+          });
+
           certPage.drawImage(img, {
-            x: cw - 120,
-            y: y - boxH + 18,
-            width: 66,
-            height: 70,
+            x: photoX,
+            y: photoY,
+            width: photoDim,
+            height: photoDim,
+          });
+
+          // Badge label below photo
+          certPage.drawText("SELFIE + GPS PROOF", {
+            x: photoX - 1,
+            y: photoY - 9,
+            size: 6.5,
+            font: helveticaBold,
+            color: rgb(0.76, 0.25, 0.05),
           });
         } catch {
           // ignore invalid photo bytes
         }
       }
     }
-    y -= boxH + 14;
+    y -= boxH + 16;
   }
 
   certPage.drawText(
-    "This document was electronically signed and sealed by StandardRoofs Sign. Tampering invalidates the SHA-256 checksum.",
+    "This document was electronically signed and verified by Standard e-Sign. Tampering invalidates the SHA-256 checksum.",
     {
       x: 40,
       y: 36,

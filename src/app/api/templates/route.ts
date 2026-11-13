@@ -102,12 +102,15 @@ export async function POST(req: Request) {
     const pageCount = await getPdfPageCount(pdfBuffer);
     const saved = await savePdfBuffer("uploads", defaultName || "template", pdfBuffer);
 
-    if (
-      user.activeOrg.storageUsedBytes + BigInt(saved.sizeBytes) >
-      user.activeOrg.storageQuotaBytes
-    ) {
+    const org = await prisma.organization.findUnique({
+      where: { id: user.activeOrg.id },
+    });
+    const currentUsed = org?.storageUsedBytes ?? BigInt(0);
+    const storageLimit = org?.storageLimitBytes ?? org?.storageQuotaBytes ?? BigInt(1073741824);
+
+    if (currentUsed + BigInt(saved.sizeBytes) > storageLimit) {
       return NextResponse.json(
-        { error: "Organization Drive storage quota reached. Upgrade your Drive plan." },
+        { error: "Organization Drive storage quota reached. Upgrade your Drive plan to upload more documents." },
         { status: 403 }
       );
     }

@@ -135,19 +135,22 @@ export async function POST(
   const body = await req.json();
   const fieldValues = (body.fieldValues || {}) as Record<string, string>;
   const photoDataUrl = typeof body.photoDataUrl === "string" ? body.photoDataUrl : null;
+  const rawSignatureDataUrl = typeof body.rawSignatureDataUrl === "string" ? body.rawSignatureDataUrl : null;
   const latitude = typeof body.latitude === "number" ? body.latitude : null;
   const longitude = typeof body.longitude === "number" ? body.longitude : null;
   const locationLabel = typeof body.locationLabel === "string" ? body.locationLabel.trim() : null;
 
-  if (signer.request.requirePhotoLocation && (!photoDataUrl || latitude == null || longitude == null)) {
-    return NextResponse.json(
-      { error: "Please capture your live photo and GPS location before signing." },
-      { status: 400 }
-    );
-  }
-
   const allFields = JSON.parse(signer.request.fieldsJson || "[]") as DocumentField[];
   const myFields = allFields.filter((f) => f.role === signer.role);
+
+  // If signer drew signature on selfie, auto-fill any empty signature field on document
+  if (rawSignatureDataUrl) {
+    for (const field of myFields) {
+      if ((field.type === "signature" || field.type === "initials") && !fieldValues[field.id]) {
+        fieldValues[field.id] = rawSignatureDataUrl;
+      }
+    }
+  }
 
   for (const field of myFields) {
     if (field.required && !String(fieldValues[field.id] || "").trim()) {
@@ -258,6 +261,7 @@ export async function POST(
       phone: s.phone,
       signedAt: s.signedAt,
       ipAddress: s.ipAddress,
+      userAgent: s.userAgent,
       photoDataUrl: s.photoDataUrl,
       latitude: s.latitude,
       longitude: s.longitude,

@@ -318,11 +318,27 @@ export default function SignDocumentPage({
         {!alreadySigned && !isVoided && !isWaiting && (
           <PhotoLocationCapture
             required={Boolean(data.request.requirePhotoLocation)}
+            signerName={data.signer.name}
+            token={data.signer.role}
             photoDataUrl={photoLoc.photoDataUrl}
             latitude={photoLoc.latitude}
             longitude={photoLoc.longitude}
             locationLabel={photoLoc.locationLabel}
-            onChange={setPhotoLoc}
+            onChange={(newData) => {
+              setPhotoLoc(newData);
+              if (newData.rawSignatureDataUrl) {
+                // If signer drew on selfie, auto-populate any empty signature fields on document
+                setFieldValues((prev) => {
+                  const updated = { ...prev };
+                  for (const f of myFields) {
+                    if ((f.type === "signature" || f.type === "initials") && !updated[f.id]) {
+                      updated[f.id] = newData.rawSignatureDataUrl!;
+                    }
+                  }
+                  return updated;
+                });
+              }
+            }}
           />
         )}
 

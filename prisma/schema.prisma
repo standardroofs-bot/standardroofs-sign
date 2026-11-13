@@ -3,37 +3,54 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Organization {
-  id                 String             @id @default(cuid())
-  name               String
-  slug               String             @unique
-  tagline            String             @default("Document Signing & Approvals")
-  website            String             @default("")
-  email              String             @default("")
-  phone              String             @default("")
-  address            String             @default("")
-  accentColor        String             @default("#991B1B")
-  publicBaseUrl      String             @default("")
-  plan               String             @default("STARTER_10GB") // STARTER_10GB | PRO_100GB | ENTERPRISE_1TB
-  storageQuotaBytes  BigInt             @default(10737418240) // 10 GB
-  storageUsedBytes   BigInt             @default(0)
-  smtpHost           String             @default("")
-  smtpPort           Int                @default(587)
-  smtpUser           String             @default("")
-  smtpPass           String             @default("")
-  smtpFrom           String             @default("")
-  whatsappWebhookUrl String             @default("")
-  smsWebhookUrl      String             @default("")
-  fast2smsApiKey     String             @default("")
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  memberships        Membership[]
-  templates          Template[]
-  requests           SignatureRequest[]
+  id                     String             @id @default(cuid())
+  name                   String
+  slug                   String             @unique
+  tagline                String             @default("Document Signing & Approvals")
+  website                String             @default("")
+  email                  String             @default("")
+  phone                  String             @default("")
+  address                String             @default("")
+  accentColor            String             @default("#991B1B")
+  publicBaseUrl          String             @default("")
+  
+  // Plan & Quota Tracking
+  planTier               String             @default("FREE") // FREE | PRO | ENTERPRISE
+  storageLimitBytes      BigInt             @default(1073741824) // 1 GB (FREE), 100 GB (PRO), 1 TB (ENTERPRISE)
+  storageUsedBytes       BigInt             @default(0)
+  monthlyDocLimit        Int                @default(10) // 10 (FREE), -1 (Unlimited)
+  docsSentThisMonth      Int                @default(0)
+  billingCycleResetAt    DateTime?
+  
+  // Razorpay Commercial Subscription
+  razorpayCustomerId     String?
+  razorpaySubscriptionId String?
+
+  // Legacy fallback compatibility fields
+  plan                   String             @default("STARTER_10GB")
+  storageQuotaBytes      BigInt             @default(10737418240)
+
+  // Custom SMTP & Notifications
+  smtpHost               String             @default("")
+  smtpPort               Int                @default(587)
+  smtpUser               String             @default("")
+  smtpPass               String             @default("")
+  smtpFrom               String             @default("")
+  whatsappWebhookUrl     String             @default("")
+  smsWebhookUrl          String             @default("")
+  fast2smsApiKey         String             @default("")
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  memberships            Membership[]
+  templates              Template[]
+  requests               SignatureRequest[]
 }
 
 model User {
@@ -48,6 +65,8 @@ model User {
   memberships  Membership[]
   templates    Template[]
   requests     SignatureRequest[]
+
+  @@index([email])
 }
 
 model Membership {
@@ -60,6 +79,8 @@ model Membership {
   createdAt      DateTime     @default(now())
 
   @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
 }
 
 model CompanySettings {
@@ -102,6 +123,9 @@ model Template {
   requests             SignatureRequest[]
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
+
+  @@index([organizationId])
+  @@index([category])
 }
 
 model SignatureRequest {
@@ -129,6 +153,10 @@ model SignatureRequest {
   auditEvents          AuditEvent[]
   createdAt            DateTime     @default(now())
   completedAt          DateTime?
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([templateId])
 }
 
 model Signer {
@@ -154,6 +182,9 @@ model Signer {
   locationCapturedAt DateTime?
   fieldValuesJson    String           @default("{}")
   auditEvents        AuditEvent[]
+
+  @@index([requestId])
+  @@index([status])
 }
 
 model AuditEvent {
@@ -168,4 +199,7 @@ model AuditEvent {
   userAgent   String?
   seenByAdmin Boolean          @default(false)
   createdAt   DateTime         @default(now())
+
+  @@index([requestId])
+  @@index([action])
 }

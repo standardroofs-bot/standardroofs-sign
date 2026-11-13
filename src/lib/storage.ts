@@ -1,6 +1,13 @@
 import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 
 const STORAGE_ROOT = path.resolve(
   process.cwd(),
@@ -12,8 +19,12 @@ export function getStorageRoot(): string {
 }
 
 export async function ensureStorageDirs() {
-  await fs.mkdir(path.join(STORAGE_ROOT, "uploads"), { recursive: true });
-  await fs.mkdir(path.join(STORAGE_ROOT, "signed"), { recursive: true });
+  try {
+    await fs.mkdir(path.join(STORAGE_ROOT, "uploads"), { recursive: true });
+    await fs.mkdir(path.join(STORAGE_ROOT, "signed"), { recursive: true });
+  } catch {
+    // Ignore error if directory already exists
+  }
 }
 
 export function sha256Buffer(buffer: Buffer): string {
@@ -39,55 +50,136 @@ function resolveSafeStoragePath(relativePath: string): string {
   return resolved;
 }
 
-export const DRIVE_PLANS = {
-  STARTER_10GB: {
-    id: "STARTER_10GB",
-    label: "Starter — 10 GB Drive",
-    quotaBytes: BigInt(10) * BigInt(1024 * 1024 * 1024),
-    priceLabel: "Free",
-  },
-  PRO_100GB: {
-    id: "PRO_100GB",
-    label: "Business — 100 GB Drive",
-    quotaBytes: BigInt(100) * BigInt(1024 * 1024 * 1024),
-    priceLabel: "₹1,499 / mo",
-  },
-  ENTERPRISE_1TB: {
-    id: "ENTERPRISE_1TB",
-    label: "Enterprise — 1 TB Drive",
-    quotaBytes: BigInt(1024) * BigInt(1024 * 1024 * 1024),
-    priceLabel: "₹4,999 / mo",
-  },
-} as const;
+// -----------------------------------------------------------------------------
+// Cloudflare R2 / AWS S3 Client Initialization
+// -----------------------------------------------------------------------------
+const isR2Configured = Boolean(
+  process.env.STORAGE_DRIVER === "r2" ||
+  (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY)
+);
 
-export function formatBytes(bytes: number | bigint): string {
-  const n = typeof bytes === "bigint" ? Number(bytes) : bytes;
-  if (n <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.min(units.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
-  return `${(n / Math.pow(1024, i)).toFixed(i >= 2 ? 2 : 0)} ${units[i]}`;
+let s3ClientInstance: S3Client | null = null;
+
+function getS3Client(): S3Client | null {
+  if (!isR2Configured) return null;
+  if (!s3ClientInstance) {
+    const accountId = process.env.R2_ACCOUNT_ID || "";
+    const endpoint =
+      process.env.R2_ENDPOINT ||
+      (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined);
+
+    s3ClientInstance = new S3Client({
+      region: "auto",
+      endpoint,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
+      },
+    });
+  }
+  return s3ClientInstance;
 }
 
+export function isCloudflareR2Active(): boolean {
+  return isR2Configured;
+}
+
+// -----------------------------------------------------------------------------
+// Core Save & Read Operations with Seamless Fallback
+// -----------------------------------------------------------------------------
 export async function savePdfBuffer(
   subdir: "uploads" | "signed",
   filenamePrefix: string,
   buffer: Buffer
 ): Promise<{ relativePath: string; hash: string; sizeBytes: number }> {
-  await ensureStorageDirs();
   const safePrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 48);
   const fileName = `${safePrefix}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.pdf`;
   const relativePath = `${subdir}/${fileName}`;
+  const hash = sha256Buffer(buffer);
+  const sizeBytes = buffer.length;
+
+  const s3 = getS3Client();
+  const bucket = process.env.R2_BUCKET_NAME || "standard-esign-documents";
+
+  if (s3 && process.env.STORAGE_DRIVER === "r2") {
+    try {
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: relativePath,
+          Body: buffer,
+          ContentType: "application/pdf",
+          Metadata: {
+            sha256: hash,
+            uploadedAt: new Date().toISOString(),
+          },
+        })
+      );
+      return { relativePath, hash, sizeBytes };
+    } catch (err) {
+      console.error("Cloudflare R2 PutObject failed, falling back to local storage:", err);
+    }
+  }
+
+  // Fallback / Default: Local Disk Storage
+  await ensureStorageDirs();
   const fullPath = resolveSafeStoragePath(relativePath);
   await fs.writeFile(fullPath, buffer);
+
   return {
     relativePath,
-    hash: sha256Buffer(buffer),
-    sizeBytes: buffer.length,
+    hash,
+    sizeBytes,
   };
 }
 
 export async function readPdfBuffer(relativePath: string): Promise<Buffer> {
+  const s3 = getS3Client();
+  const bucket = process.env.R2_BUCKET_NAME || "standard-esign-documents";
+
+  if (s3 && process.env.STORAGE_DRIVER === "r2") {
+    try {
+      const response = await s3.send(
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: relativePath,
+        })
+      );
+      if (response.Body) {
+        const bytes = await response.Body.transformToByteArray();
+        return Buffer.from(bytes);
+      }
+    } catch (err) {
+      console.warn("Could not read from Cloudflare R2, falling back to local file:", err);
+    }
+  }
+
+  // Fallback / Default: Local File
   const fullPath = resolveSafeStoragePath(relativePath);
   return fs.readFile(fullPath);
 }
 
+export async function deletePdfBuffer(relativePath: string): Promise<void> {
+  const s3 = getS3Client();
+  const bucket = process.env.R2_BUCKET_NAME || "standard-esign-documents";
+
+  if (s3 && process.env.STORAGE_DRIVER === "r2") {
+    try {
+      await s3.send(
+        new DeleteObjectCommand({
+          Bucket: bucket,
+          Key: relativePath,
+        })
+      );
+    } catch {
+      // Ignore deletion errors on remote
+    }
+  }
+
+  try {
+    const fullPath = resolveSafeStoragePath(relativePath);
+    await fs.unlink(fullPath);
+  } catch {
+    // Ignore local file unlink error if file doesn't exist
+  }
+}

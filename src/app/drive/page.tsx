@@ -63,13 +63,20 @@ export default async function DrivePage() {
             requests.reduce((acc, r) => acc + r.fileSizeBytes, 0)
         );
 
+  const storageLimit =
+    user.activeOrg.storageLimitBytes ||
+    user.activeOrg.storageQuotaBytes ||
+    BigInt(1073741824);
+
   return (
     <AppShell user={user}>
       <DriveClient
         orgName={user.activeOrg.name}
-        plan={user.activeOrg.plan}
+        planTier={user.activeOrg.planTier || "FREE"}
+        monthlyDocLimit={user.activeOrg.monthlyDocLimit ?? 10}
+        docsSentThisMonth={user.activeOrg.docsSentThisMonth ?? 0}
         usedBytes={totalUsed.toString()}
-        quotaBytes={user.activeOrg.storageQuotaBytes.toString()}
+        storageLimitBytes={storageLimit.toString()}
         files={files}
       />
     </AppShell>
