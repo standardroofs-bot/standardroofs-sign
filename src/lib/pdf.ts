@@ -45,6 +45,7 @@ export interface SignerAuditInfo {
   latitude?: number | null;
   longitude?: number | null;
   locationLabel?: string | null;
+  locationAddress?: string | null;
   fieldValues: Record<string, string>;
 }
 
@@ -263,9 +264,9 @@ export async function applySignaturesAndFinalizePdf(
   y -= 20;
 
   for (const signer of input.signers) {
-    if (y < 120) break;
+    if (y < 130) break;
     const hasPhoto = Boolean(signer.photoDataUrl);
-    const boxH = hasPhoto ? 104 : 74;
+    const boxH = hasPhoto ? 128 : signer.latitude != null ? 116 : 78;
     certPage.drawRectangle({
       x: 40,
       y: y - boxH + 12,
@@ -276,64 +277,104 @@ export async function applySignaturesAndFinalizePdf(
       borderWidth: 1,
     });
 
-    const maxTextW = hasPhoto ? cw - 200 : cw - 100;
-
+    let textY = y - 6;
     certPage.drawText(`${signer.role}: ${signer.name}`, {
       x: 52,
-      y: y - 5,
-      size: 11,
+      y: textY,
+      size: 10.5,
       font: helveticaBold,
       color: rgb(0.06, 0.09, 0.16),
     });
+    textY -= 15;
 
     certPage.drawText(
       `Email: ${signer.email || "N/A"}${signer.phone ? `  |  Phone: ${signer.phone}` : ""}`,
       {
         x: 52,
-        y: y - 22,
-        size: 9,
+        y: textY,
+        size: 8.5,
         font: helvetica,
         color: rgb(0.3, 0.35, 0.42),
       }
     );
+    textY -= 14;
 
     certPage.drawText(
       `Signed: ${signer.signedAt ? signer.signedAt.toISOString() : "Pending"}  |  IP: ${signer.ipAddress || "127.0.0.1"}`,
       {
         x: 52,
-        y: y - 37,
-        size: 8.5,
+        y: textY,
+        size: 8,
         font: helvetica,
         color: rgb(0.08, 0.48, 0.28),
       }
     );
+    textY -= 13;
 
     if (signer.userAgent) {
       certPage.drawText(
-        `Device / UA: ${signer.userAgent.slice(0, 68)}`,
+        `Device / UA: ${signer.userAgent.slice(0, 64)}`,
         {
           x: 52,
-          y: y - 51,
+          y: textY,
           size: 7.5,
           font: helvetica,
           color: rgb(0.4, 0.45, 0.52),
         }
       );
+      textY -= 12;
     }
 
     if (signer.latitude != null && signer.longitude != null) {
       certPage.drawText(
         `GPS Locked: ${signer.latitude.toFixed(6)}, ${signer.longitude.toFixed(6)}${
-          signer.locationLabel ? ` (${signer.locationLabel.slice(0, 36)})` : ""
+          signer.locationLabel ? ` (${signer.locationLabel.slice(0, 30)})` : ""
         }`,
         {
           x: 52,
-          y: y - (signer.userAgent ? 65 : 53),
-          size: 8.5,
+          y: textY,
+          size: 8,
           font: helveticaBold,
           color: rgb(0.65, 0.12, 0.12),
         }
       );
+      textY -= 12;
+
+      const addr = signer.locationAddress || signer.locationLabel || "";
+      if (addr) {
+        const line1 = addr.slice(0, 62);
+        const line2 = addr.length > 62 ? addr.slice(62, 124) : "";
+        certPage.drawText(`Live Address: ${line1}`, {
+          x: 52,
+          y: textY,
+          size: 7.5,
+          font: helvetica,
+          color: rgb(0.2, 0.25, 0.32),
+        });
+        textY -= 11;
+        if (line2) {
+          certPage.drawText(`              ${line2}`, {
+            x: 52,
+            y: textY,
+            size: 7.5,
+            font: helvetica,
+            color: rgb(0.2, 0.25, 0.32),
+          });
+          textY -= 11;
+        }
+      }
+
+      certPage.drawText(
+        `Map Verification: https://maps.google.com/?q=${signer.latitude.toFixed(6)},${signer.longitude.toFixed(6)}`,
+        {
+          x: 52,
+          y: textY,
+          size: 7.5,
+          font: helvetica,
+          color: rgb(0.12, 0.45, 0.78),
+        }
+      );
+      textY -= 12;
     }
 
     if (signer.photoDataUrl) {
@@ -347,7 +388,7 @@ export async function applySignaturesAndFinalizePdf(
 
           const photoDim = 88;
           const photoX = cw - 40 - photoDim - 10;
-          const photoY = y - boxH + 18;
+          const photoY = y - boxH + 20;
 
           // Border frame around selfie proof
           certPage.drawRectangle({
@@ -380,7 +421,7 @@ export async function applySignaturesAndFinalizePdf(
         }
       }
     }
-    y -= boxH + 16;
+    y -= boxH + 14;
   }
 
   certPage.drawText(

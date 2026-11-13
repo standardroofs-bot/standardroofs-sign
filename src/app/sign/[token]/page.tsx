@@ -71,11 +71,13 @@ export default function SignDocumentPage({
     latitude: number | null;
     longitude: number | null;
     locationLabel: string;
+    locationAddress?: string;
   }>({
     photoDataUrl: "",
     latitude: null,
     longitude: null,
     locationLabel: "",
+    locationAddress: "",
   });
 
   async function loadSession() {
@@ -125,6 +127,7 @@ export default function SignDocumentPage({
           latitude: photoLoc.latitude,
           longitude: photoLoc.longitude,
           locationLabel: photoLoc.locationLabel || null,
+          locationAddress: photoLoc.locationAddress || null,
         }),
       });
       const json = await res.json();
@@ -324,6 +327,7 @@ export default function SignDocumentPage({
             latitude={photoLoc.latitude}
             longitude={photoLoc.longitude}
             locationLabel={photoLoc.locationLabel}
+            locationAddress={photoLoc.locationAddress}
             onChange={(newData) => {
               setPhotoLoc(newData);
               if (newData.rawSignatureDataUrl) {

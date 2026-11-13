@@ -19,6 +19,7 @@ export interface PhotoLocationData {
   latitude: number | null;
   longitude: number | null;
   locationLabel: string;
+  locationAddress?: string;
 }
 
 interface PhotoLocationCaptureProps {
@@ -29,6 +30,7 @@ interface PhotoLocationCaptureProps {
   latitude: number | null;
   longitude: number | null;
   locationLabel: string;
+  locationAddress?: string;
   onChange: (data: PhotoLocationData) => void;
 }
 
@@ -45,11 +47,13 @@ export default function PhotoLocationCapture({
   latitude,
   longitude,
   locationLabel,
+  locationAddress = "",
   onChange,
 }: PhotoLocationCaptureProps) {
   const [cameraActive, setCameraActive] = useState(false);
   const [locLoading, setLocLoading] = useState(false);
   const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [resolvedAddress, setResolvedAddress] = useState<string>(locationAddress || "");
   const [error, setError] = useState("");
   const [penColor, setPenColor] = useState<string>("#1D4ED8"); // Blue default ink
   const [hasDrawnSignature, setHasDrawnSignature] = useState(false);
@@ -82,6 +86,29 @@ export default function PhotoLocationCapture({
     return `${ist} IST (${d.toISOString().slice(11, 19)} UTC)`;
   }, []);
 
+  // Server-side reverse geocoding lookup
+  const reverseGeocodeCoords = useCallback(async (lat: number, lng: number): Promise<string> => {
+    try {
+      const res = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`);
+      if (!res.ok) return "";
+      const json = await res.json();
+      const addr = (json.address as string) || "";
+      if (addr) {
+        setResolvedAddress(addr);
+      }
+      return addr;
+    } catch {
+      return "";
+    }
+  }, []);
+
+  // Auto-reverse geocode if coordinates exist but address is not yet set
+  useEffect(() => {
+    if (latitude != null && longitude != null && !resolvedAddress) {
+      void reverseGeocodeCoords(latitude, longitude);
+    }
+  }, [latitude, longitude, resolvedAddress, reverseGeocodeCoords]);
+
   // Fetch HTML5 Geolocation with high accuracy
   const requestGps = useCallback((): Promise<{ lat: number; lng: number; acc: number } | null> => {
     if (typeof window === "undefined" || !navigator.geolocation) {
@@ -110,14 +137,19 @@ export default function PhotoLocationCapture({
   // Start front camera
   async function startCamera() {
     setError("");
-    // Trigger GPS acquisition in parallel so it's ready when user snaps photo
-    void requestGps().then((coords) => {
+    // Trigger GPS acquisition and address resolution in parallel
+    void requestGps().then(async (coords) => {
       if (coords) {
+        let addr = resolvedAddress;
+        if (!addr) {
+          addr = await reverseGeocodeCoords(coords.lat, coords.lng);
+        }
         onChange({
           photoDataUrl,
           latitude: coords.lat,
           longitude: coords.lng,
           locationLabel,
+          locationAddress: addr,
         });
       }
     });
@@ -151,7 +183,7 @@ export default function PhotoLocationCapture({
     sourceImg: CanvasImageSource,
     srcWidth: number,
     srcHeight: number,
-    coords: { lat: number | null; lng: number | null; acc: number | null }
+    coords: { lat: number | null; lng: number | null; acc: number | null; address?: string }
   ): string {
     const canvas = document.createElement("canvas");
     const targetW = 640;
@@ -164,33 +196,28 @@ export default function PhotoLocationCapture({
     // 1. Draw original selfie
     ctx.drawImage(sourceImg, 0, 0, targetW, targetH);
 
-    // 2. Banner height (~18% of photo)
-    const bannerH = Math.round(targetH * 0.2);
+    // 2. Banner height (enough for 4 clean lines)
+    const bannerH = Math.max(94, Math.round(targetH * 0.22));
     const bannerY = targetH - bannerH;
 
     // Semi-transparent dark gradient banner
     const grad = ctx.createLinearGradient(0, bannerY, 0, targetH);
-    grad.addColorStop(0, "rgba(15, 23, 42, 0.78)");
-    grad.addColorStop(1, "rgba(15, 23, 42, 0.96)");
+    grad.addColorStop(0, "rgba(15, 23, 42, 0.82)");
+    grad.addColorStop(1, "rgba(15, 23, 42, 0.98)");
     ctx.fillStyle = grad;
     ctx.fillRect(0, bannerY, targetW, bannerH);
 
-    // Top gold/crimson highlight bar
+    // Top crimson highlight bar
     ctx.fillStyle = "#DC2626";
     ctx.fillRect(0, bannerY, targetW, 3);
 
-    // Text details
+    // Line 1: Header + Signer Name
     ctx.fillStyle = "#FFFFFF";
-    ctx.font = "bold 15px sans-serif";
-    ctx.fillText("🛡️ STANDARD e-SIGN — SIGN-ON-SELFIE PROOF", 16, bannerY + 24);
+    ctx.font = "bold 13px sans-serif";
+    const signerTag = `🛡️ STANDARD e-SIGN — SIGN-ON-SELFIE PROOF • ${signerName}${token ? ` (${token.slice(0, 8)})` : ""}`;
+    ctx.fillText(signerTag, 16, bannerY + 22);
 
-    ctx.font = "12px sans-serif";
-    ctx.fillStyle = "#E2E8F0";
-    const signerTag = `Signer: ${signerName}${token ? ` (${token.slice(0, 10)})` : ""}`;
-    ctx.fillText(signerTag, 16, bannerY + 44);
-
-    // GPS & timestamp line
-    const timeStr = getFormattedTimestamps();
+    // Line 2: GPS coordinates & accuracy
     let gpsStr = "GPS: Location Pending / Disabled";
     if (coords.lat != null && coords.lng != null) {
       gpsStr = `GPS: ${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}${
@@ -199,11 +226,20 @@ export default function PhotoLocationCapture({
     }
     ctx.font = "bold 11px monospace";
     ctx.fillStyle = "#38BDF8"; // Cyan highlight for GPS
-    ctx.fillText(gpsStr, 16, bannerY + 64);
+    ctx.fillText(gpsStr, 16, bannerY + 40);
 
+    // Line 3: Truncated readable address up to ~68 chars
+    const addr = coords.address || resolvedAddress || "Detecting live street address...";
+    const truncatedAddr = addr.length > 68 ? addr.slice(0, 65) + "..." : addr;
     ctx.font = "11px sans-serif";
+    ctx.fillStyle = "#E2E8F0";
+    ctx.fillText(`LOC: ${truncatedAddr}`, 16, bannerY + 58);
+
+    // Line 4: IST & UTC timestamp
+    const timeStr = getFormattedTimestamps();
+    ctx.font = "10px sans-serif";
     ctx.fillStyle = "#94A3B8";
-    ctx.fillText(`Timestamp: ${timeStr}`, 16, bannerY + 82);
+    ctx.fillText(`TIME: ${timeStr}`, 16, bannerY + 76);
 
     return canvas.toDataURL("image/jpeg", 0.88);
   }
@@ -216,22 +252,26 @@ export default function PhotoLocationCapture({
     let currentLat = latitude;
     let currentLng = longitude;
     let currentAcc = accuracy;
+    let currentAddr = resolvedAddress;
 
     // Refresh GPS coordinates if not already present
-    if (currentLat == null) {
+    if (currentLat == null || currentLng == null) {
       const coords = await requestGps();
       if (coords) {
         currentLat = coords.lat;
         currentLng = coords.lng;
         currentAcc = coords.acc;
+        currentAddr = await reverseGeocodeCoords(coords.lat, coords.lng);
       }
+    } else if (!currentAddr) {
+      currentAddr = await reverseGeocodeCoords(currentLat, currentLng);
     }
 
     const stampedDataUrl = burnVerificationBanner(
       video,
       video.videoWidth || 640,
       video.videoHeight || 640,
-      { lat: currentLat, lng: currentLng, acc: currentAcc }
+      { lat: currentLat, lng: currentLng, acc: currentAcc, address: currentAddr }
     );
 
     stopCamera();
@@ -246,6 +286,7 @@ export default function PhotoLocationCapture({
       latitude: currentLat,
       longitude: currentLng,
       locationLabel,
+      locationAddress: currentAddr,
     });
   }
 
@@ -254,21 +295,25 @@ export default function PhotoLocationCapture({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    void requestGps().then((coords) => {
+    void requestGps().then(async (coords) => {
+      const currentLat = coords?.lat ?? latitude;
+      const currentLng = coords?.lng ?? longitude;
+      const currentAcc = coords?.acc ?? accuracy;
+      let currentAddr = resolvedAddress;
+      if (currentLat != null && currentLng != null && !currentAddr) {
+        currentAddr = await reverseGeocodeCoords(currentLat, currentLng);
+      }
+
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === "string") {
           const img = new Image();
           img.onload = () => {
-            const currentLat = coords?.lat ?? latitude;
-            const currentLng = coords?.lng ?? longitude;
-            const currentAcc = coords?.acc ?? accuracy;
-
             const stamped = burnVerificationBanner(
               img,
               img.width,
               img.height,
-              { lat: currentLat, lng: currentLng, acc: currentAcc }
+              { lat: currentLat, lng: currentLng, acc: currentAcc, address: currentAddr }
             );
 
             setBaseSelfieUrl(stamped);
@@ -281,6 +326,7 @@ export default function PhotoLocationCapture({
               latitude: currentLat,
               longitude: currentLng,
               locationLabel,
+              locationAddress: currentAddr,
             });
           };
           img.src = reader.result;
@@ -343,10 +389,11 @@ export default function PhotoLocationCapture({
         latitude,
         longitude,
         locationLabel,
+        locationAddress: resolvedAddress,
       });
     };
     baseImg.src = baseSelfieUrl;
-  }, [baseSelfieUrl, latitude, longitude, locationLabel, onChange]);
+  }, [baseSelfieUrl, latitude, longitude, locationLabel, resolvedAddress, onChange]);
 
   // Mouse / Touch Event Handlers for Signature Drawing
   function getCanvasCoords(e: React.MouseEvent | React.TouchEvent): Point | null {
@@ -422,6 +469,7 @@ export default function PhotoLocationCapture({
         latitude,
         longitude,
         locationLabel,
+        locationAddress: resolvedAddress,
       });
     }
   }
@@ -439,6 +487,7 @@ export default function PhotoLocationCapture({
         latitude,
         longitude,
         locationLabel,
+        locationAddress: resolvedAddress,
       });
     }
   }
@@ -631,6 +680,7 @@ export default function PhotoLocationCapture({
                         latitude,
                         longitude,
                         locationLabel,
+                        locationAddress: resolvedAddress,
                       });
                     }}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold cursor-pointer"
@@ -651,7 +701,7 @@ export default function PhotoLocationCapture({
                   Ready to verify your presence?
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Take a quick live selfie or select a photo from your gallery. GPS coordinates will be stamped automatically.
+                  Take a quick live selfie or select a photo from your gallery. GPS coordinates and live street address will be stamped automatically.
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
@@ -690,13 +740,18 @@ export default function PhotoLocationCapture({
             <button
               type="button"
               onClick={() => {
-                void requestGps().then((coords) => {
+                void requestGps().then(async (coords) => {
                   if (coords) {
+                    let addr = resolvedAddress;
+                    if (!addr) {
+                      addr = await reverseGeocodeCoords(coords.lat, coords.lng);
+                    }
                     onChange({
                       photoDataUrl,
                       latitude: coords.lat,
                       longitude: coords.lng,
                       locationLabel,
+                      locationAddress: addr,
                     });
                   }
                 });
@@ -731,6 +786,15 @@ export default function PhotoLocationCapture({
                   Lat: {latitude.toFixed(6)}<br />
                   Lng: {longitude.toFixed(6)}
                 </div>
+                {resolvedAddress ? (
+                  <div className="text-[11px] text-emerald-950 bg-white/80 p-2 rounded-lg border border-emerald-200/80 leading-snug">
+                    <span className="font-bold text-emerald-900">📍 Live Address:</span> {resolvedAddress}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-emerald-700 italic">
+                    Resolving live address...
+                  </div>
+                )}
                 <a
                   href={`https://maps.google.com/?q=${latitude},${longitude}`}
                   target="_blank"
@@ -760,6 +824,7 @@ export default function PhotoLocationCapture({
                     latitude,
                     longitude,
                     locationLabel: e.target.value,
+                    locationAddress: resolvedAddress,
                   })
                 }
                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-red-700/20"

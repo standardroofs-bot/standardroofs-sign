@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { readPdfBuffer, savePdfBuffer } from "@/lib/storage";
 import { applySignaturesAndFinalizePdf } from "@/lib/pdf";
 import { dispatchInvite, sendCompletedCopiesEmail } from "@/lib/dispatch";
+import { reverseGeocode } from "@/lib/geocode";
 import { CATEGORY_LABELS, type DocumentCategory, type DocumentField } from "@/lib/types";
 
 function getClientIp(req: Request): string {
@@ -139,6 +140,17 @@ export async function POST(
   const latitude = typeof body.latitude === "number" ? body.latitude : null;
   const longitude = typeof body.longitude === "number" ? body.longitude : null;
   const locationLabel = typeof body.locationLabel === "string" ? body.locationLabel.trim() : null;
+  let locationAddress = typeof body.locationAddress === "string" ? body.locationAddress.trim() : null;
+
+  // If coordinates are present but client didn't supply an address, resolve server-side
+  if (!locationAddress && latitude != null && longitude != null) {
+    try {
+      const geo = await reverseGeocode(latitude, longitude);
+      if (geo.address) locationAddress = geo.address;
+    } catch {
+      // ignore
+    }
+  }
 
   const allFields = JSON.parse(signer.request.fieldsJson || "[]") as DocumentField[];
   const myFields = allFields.filter((f) => f.role === signer.role);
@@ -176,6 +188,7 @@ export async function POST(
       latitude,
       longitude,
       locationLabel,
+      locationAddress,
       locationCapturedAt: photoDataUrl || latitude != null ? now : null,
       fieldValuesJson: JSON.stringify(fieldValues),
     },
@@ -266,6 +279,7 @@ export async function POST(
       latitude: s.latitude,
       longitude: s.longitude,
       locationLabel: s.locationLabel,
+      locationAddress: s.locationAddress,
       fieldValues: JSON.parse(s.fieldValuesJson || "{}"),
     })),
     companyName: settings?.companyName || "Standard Roofs",

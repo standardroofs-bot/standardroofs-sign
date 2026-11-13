@@ -1,0 +1,219 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Organization {
+  id                     String             @id @default(cuid())
+  name                   String
+  slug                   String             @unique
+  tagline                String             @default("Document Signing & Approvals")
+  website                String             @default("")
+  email                  String             @default("")
+  phone                  String             @default("")
+  address                String             @default("")
+  accentColor            String             @default("#991B1B")
+  publicBaseUrl          String             @default("")
+  accountType            String             @default("BUSINESS") // INDIVIDUAL | BUSINESS
+  gstin                  String             @default("")
+  
+  // Plan & Quota Tracking
+  planTier               String             @default("FREE") // FREE | PRO | ENTERPRISE
+  storageLimitBytes      BigInt             @default(1073741824) // 1 GB (FREE), 100 GB (PRO), 1 TB (ENTERPRISE)
+  storageUsedBytes       BigInt             @default(0)
+  monthlyDocLimit        Int                @default(10) // 10 (FREE), -1 (Unlimited)
+  docsSentThisMonth      Int                @default(0)
+  billingCycleResetAt    DateTime?
+  
+  // Razorpay Commercial Subscription
+  razorpayCustomerId     String?
+  razorpaySubscriptionId String?
+
+  // Legacy fallback compatibility fields
+  plan                   String             @default("STARTER_10GB")
+  storageQuotaBytes      BigInt             @default(10737418240)
+
+  // Custom SMTP & Notifications
+  smtpHost               String             @default("")
+  smtpPort               Int                @default(587)
+  smtpUser               String             @default("")
+  smtpPass               String             @default("")
+  smtpFrom               String             @default("")
+  whatsappWebhookUrl     String             @default("")
+  smsWebhookUrl          String             @default("")
+  fast2smsApiKey         String             @default("")
+  whatsappApiToken       String             @default("")
+  whatsappPhoneNumberId String             @default("")
+  msg91AuthKey           String             @default("")
+  msg91TemplateId        String             @default("")
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  memberships            Membership[]
+  templates              Template[]
+  requests               SignatureRequest[]
+}
+
+model User {
+  id           String             @id @default(cuid())
+  name         String
+  email        String             @unique
+  passwordHash String
+  role         String             @default("STAFF") // ADMIN | STAFF
+  title        String             @default("Member")
+  activeOrgId  String?
+  createdAt    DateTime           @default(now())
+  memberships  Membership[]
+  templates    Template[]
+  requests     SignatureRequest[]
+
+  @@index([email])
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           String       @default("OWNER") // OWNER | ADMIN | MEMBER
+  createdAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model CompanySettings {
+  id                 String   @id @default("default")
+  companyName        String   @default("Standard Roofs")
+  tagline            String   @default("Document Signing & Approvals")
+  website            String   @default("https://www.standardroofs.in")
+  email              String   @default("info@standardroofs.in")
+  phone              String   @default("+91-86084-75787")
+  address            String   @default("Erode, Tamil Nadu, India")
+  accentColor        String   @default("#991B1B")
+  publicBaseUrl      String   @default("")
+  smtpHost           String   @default("")
+  smtpPort           Int      @default(587)
+  smtpUser           String   @default("")
+  smtpPass           String   @default("")
+  smtpFrom           String   @default("Standard Roofs <info@standardroofs.in>")
+  whatsappWebhookUrl String   @default("")
+  smsWebhookUrl      String   @default("")
+  fast2smsApiKey     String   @default("")
+  whatsappApiToken   String   @default("")
+  whatsappPhoneNumberId String @default("")
+  msg91AuthKey       String   @default("")
+  msg91TemplateId    String   @default("")
+  updatedAt          DateTime @updatedAt
+}
+
+model Template {
+  id                   String             @id @default(cuid())
+  organizationId       String             @default("org_standard_roofs")
+  organization         Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                 String
+  category             String             @default("QUOTATION_BOQ")
+  description          String             @default("")
+  pdfPath              String
+  fileSizeBytes        Int                @default(0)
+  pageCount            Int                @default(1)
+  originalHash         String
+  requirePhotoLocation Boolean            @default(false)
+  rolesJson            String             @default("[]")
+  fieldsJson           String             @default("[]")
+  createdById          String
+  createdBy            User               @relation(fields: [createdById], references: [id])
+  requests             SignatureRequest[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([organizationId])
+  @@index([category])
+}
+
+model SignatureRequest {
+  id                   String       @id @default(cuid())
+  organizationId       String       @default("org_standard_roofs")
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title                String
+  projectName          String       @default("")
+  category             String       @default("QUOTATION_BOQ")
+  message              String       @default("")
+  status               String       @default("PENDING") // PENDING | PARTIAL | COMPLETED | VOIDED
+  signingOrder         String       @default("SEQUENTIAL") // SEQUENTIAL | PARALLEL
+  requirePhotoLocation Boolean      @default(false)
+  originalPdfPath      String
+  signedPdfPath        String?
+  fileSizeBytes        Int          @default(0)
+  originalHash         String
+  signedHash           String?
+  fieldsJson           String       @default("[]")
+  templateId           String?
+  template             Template?    @relation(fields: [templateId], references: [id])
+  createdById          String
+  createdBy            User         @relation(fields: [createdById], references: [id])
+  signers              Signer[]
+  auditEvents          AuditEvent[]
+  expiresAt            DateTime?
+  lastReminderAt       DateTime?
+  createdAt            DateTime     @default(now())
+  completedAt          DateTime?
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([templateId])
+}
+
+model Signer {
+  id                 String           @id @default(cuid())
+  requestId          String
+  request            SignatureRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  role               String
+  name               String
+  email              String           @default("")
+  phone              String           @default("")
+  channels           String           @default("WHATSAPP")
+  orderIndex         Int              @default(0)
+  token              String           @unique
+  status             String           @default("PENDING") // WAITING | PENDING | VIEWED | SIGNED
+  viewedAt           DateTime?
+  signedAt           DateTime?
+  ipAddress          String?
+  userAgent          String?
+  photoDataUrl       String?
+  latitude           Float?
+  longitude          Float?
+  locationLabel      String?
+  locationAddress    String?
+  locationCapturedAt DateTime?
+  fieldValuesJson    String           @default("{}")
+  auditEvents        AuditEvent[]
+
+  @@index([requestId])
+  @@index([status])
+}
+
+model AuditEvent {
+  id          String           @id @default(cuid())
+  requestId   String
+  request     SignatureRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  signerId    String?
+  signer      Signer?          @relation(fields: [signerId], references: [id], onDelete: SetNull)
+  action      String // CREATED | SENT | VIEWED | SIGNED | COMPLETED | VOIDED
+  details     String           @default("")
+  ipAddress   String?
+  userAgent   String?
+  seenByAdmin Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  @@index([requestId])
+  @@index([action])
+}
+
