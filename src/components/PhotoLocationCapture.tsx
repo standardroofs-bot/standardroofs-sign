@@ -283,10 +283,10 @@ export default function PhotoLocationCapture({
     ctx.fillStyle = "#38BDF8"; // Cyan highlight for GPS
     ctx.fillText(gpsStr, 16, bannerY + 40);
 
-    // Line 3: Truncated readable address up to ~68 chars (includes site/landmark if provided)
+    // Line 3: Readable doorstep address (includes site/landmark if provided)
     const baseAddr = coords.address || resolvedAddress || "Detecting live street address...";
-    const combinedAddr = locationLabel ? `${locationLabel}, ${baseAddr}` : baseAddr;
-    const truncatedAddr = combinedAddr.length > 68 ? combinedAddr.slice(0, 65) + "..." : combinedAddr;
+    const combinedAddr = locationLabel && !baseAddr.includes(locationLabel) ? `${locationLabel}, ${baseAddr}` : baseAddr;
+    const truncatedAddr = combinedAddr.length > 95 ? combinedAddr.slice(0, 92) + "..." : combinedAddr;
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#E2E8F0";
     ctx.fillText(`LOC: ${truncatedAddr}`, 16, bannerY + 58);
@@ -865,6 +865,69 @@ export default function PhotoLocationCapture({
                     placeholder="Auto-detecting live street address..."
                     className="w-full p-2 text-xs bg-white text-slate-900 rounded-lg border border-emerald-300 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30 leading-snug font-medium shadow-2xs resize-none"
                   />
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-500 font-medium">Quick Landmark:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const landmark = "144, Vellakkal Medu";
+                        const updated = resolvedAddress.includes(landmark)
+                          ? resolvedAddress
+                          : `${landmark}, ${resolvedAddress}`;
+                        setResolvedAddress(updated);
+                        onChange({
+                          photoDataUrl,
+                          latitude,
+                          longitude,
+                          locationLabel: landmark,
+                          locationAddress: updated,
+                        });
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shadow-2xs transition"
+                    >
+                      🏢 144, Vellakkal Medu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const landmark = "Near Sreeamman Weighbridge";
+                        const updated = resolvedAddress.includes(landmark)
+                          ? resolvedAddress
+                          : `${landmark}, ${resolvedAddress}`;
+                        setResolvedAddress(updated);
+                        onChange({
+                          photoDataUrl,
+                          latitude,
+                          longitude,
+                          locationLabel: landmark,
+                          locationAddress: updated,
+                        });
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shadow-2xs transition"
+                    >
+                      ⚖️ Sreeamman Weighbridge
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const landmark = "SH 173, Nasiyanur";
+                        const updated = resolvedAddress.includes(landmark)
+                          ? resolvedAddress
+                          : `${landmark}, ${resolvedAddress}`;
+                        setResolvedAddress(updated);
+                        onChange({
+                          photoDataUrl,
+                          latitude,
+                          longitude,
+                          locationLabel: landmark,
+                          locationAddress: updated,
+                        });
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded-full bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 cursor-pointer shadow-2xs transition"
+                    >
+                      🛣️ SH 173 Road
+                    </button>
+                  </div>
                   <p className="text-[10px] text-emerald-700 leading-tight">
                     Confirm or refine Door No / Building / Street above. This is burned permanently onto your selfie and legal PDF certificate.
                   </p>

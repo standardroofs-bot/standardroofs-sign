@@ -11,7 +11,23 @@ export async function reverseGeocode(
 ): Promise<GeocodeResult> {
   const mapsUrl = `https://maps.google.com/?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
 
-  // 1. Google Maps Geocoding API (Doorstep Indian Precision if GOOGLE_MAPS_API_KEY is configured in env or DB)
+  // 1. Exact Landmark Match for Standard Roofs HQ & Factory Premises
+  // (11.338365, 77.659146 — Near Sreeamman Weighbridge, SH 173, Vellakkal Medu, Nasiyanur)
+  const distToHQMeters =
+    Math.hypot(
+      lat - 11.338365,
+      (lng - 77.659146) * Math.cos((lat * Math.PI) / 180)
+    ) * 111000;
+
+  if (distToHQMeters <= 750) {
+    return {
+      address:
+        "144, Vellakkal Medu, Near Sreeamman Weighbridge, SH 173, Nasiyanur, Erode, Tamil Nadu 638107, India",
+      mapsUrl,
+    };
+  }
+
+  // 2. Google Maps Geocoding API (Doorstep Indian Precision if GOOGLE_MAPS_API_KEY is configured in env or DB)
   let gApiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!gApiKey) {
     try {
@@ -44,7 +60,7 @@ export async function reverseGeocode(
     }
   }
 
-  // 2. OpenStreetMap Nominatim with dual-zoom validation & BigDataCloud Google Plus Code integration
+  // 3. OpenStreetMap Nominatim with dual-zoom validation & BigDataCloud Google Plus Code integration
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4500);
