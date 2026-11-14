@@ -32,34 +32,65 @@ export async function reverseGeocode(
       const data = await res.json();
       const addr = data.address || {};
 
-      const street =
-        addr.road ||
-        addr.suburb ||
+      // Building / place / business / landmark
+      const place =
+        addr.amenity ||
+        addr.building ||
+        addr.shop ||
+        addr.office ||
+        addr.leisure ||
+        addr.tourism ||
+        addr.commercial ||
+        "";
+
+      // House / Door / Unit number
+      const houseNumber = addr.house_number || addr.house_name || "";
+
+      // Road / Street
+      const road = addr.road || addr.street || addr.footway || "";
+
+      // Assemble door/building + road
+      const streetLine = [houseNumber, place, road].filter(Boolean).join(" ");
+
+      // Neighborhood / locality / suburb / industrial area
+      const neighbourhood =
         addr.neighbourhood ||
+        addr.suburb ||
         addr.residential ||
         addr.industrial ||
+        addr.quarter ||
         "";
+
+      // City / Town / Village / Taluk
       const locality =
         addr.city ||
         addr.town ||
         addr.village ||
-        addr.county ||
-        addr.state_district ||
+        addr.municipality ||
+        addr.city_district ||
         "";
+
+      // District / County
+      const district = addr.county || addr.state_district || "";
+
+      // State and Postcode
       const state = addr.state || "";
       const postcode = addr.postcode || "";
       const country = addr.country || "India";
 
-      const formattedParts = [
-        street,
-        locality,
+      // Build hierarchical specific address
+      const parts = [
+        streetLine,
+        neighbourhood,
+        locality && locality !== neighbourhood ? locality : "",
+        district && district !== locality && district !== neighbourhood ? district : "",
         state && postcode ? `${state} ${postcode}` : state || postcode,
         country,
       ].filter(Boolean);
 
-      if (formattedParts.length > 0) {
+      if (parts.length > 0) {
         return {
-          address: formattedParts.join(", "),
+          address: parts.join(", "),
           mapsUrl,
         };
       }

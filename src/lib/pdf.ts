@@ -340,7 +340,11 @@ export async function applySignaturesAndFinalizePdf(
       );
       textY -= 12;
 
-      const addr = signer.locationAddress || signer.locationLabel || "";
+      const baseAddr = signer.locationAddress || "";
+      const label = signer.locationLabel || "";
+      const addr = label && !baseAddr.toLowerCase().includes(label.toLowerCase())
+        ? `${label}, ${baseAddr}`
+        : baseAddr || label;
       if (addr) {
         const line1 = addr.slice(0, 62);
         const line2 = addr.length > 62 ? addr.slice(62, 124) : "";

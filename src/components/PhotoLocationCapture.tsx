@@ -109,13 +109,14 @@ export default function PhotoLocationCapture({
     }
   }, [latitude, longitude, resolvedAddress, reverseGeocodeCoords]);
 
-  // Fetch HTML5 Geolocation with high accuracy
+  // Fetch HTML5 Geolocation with high accuracy (forces live satellite fix, bypasses stale cache)
   const requestGps = useCallback((): Promise<{ lat: number; lng: number; acc: number } | null> => {
     if (typeof window === "undefined" || !navigator.geolocation) {
       return Promise.resolve(null);
     }
     setLocLoading(true);
     return new Promise((resolve) => {
+      // 1. Force real-time hardware satellite fix with maximumAge: 0
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           setLocLoading(false);
@@ -126,10 +127,24 @@ export default function PhotoLocationCapture({
           resolve({ lat, lng, acc });
         },
         () => {
-          setLocLoading(false);
-          resolve(null);
+          // 2. Fallback to relaxed settings if satellite lock takes longer or indoors
+          navigator.geolocation.getCurrentPosition(
+            (pos2) => {
+              setLocLoading(false);
+              const lat = pos2.coords.latitude;
+              const lng = pos2.coords.longitude;
+              const acc = Math.round(pos2.coords.accuracy || 25);
+              setAccuracy(acc);
+              resolve({ lat, lng, acc });
+            },
+            () => {
+              setLocLoading(false);
+              resolve(null);
+            },
+            { enableHighAccuracy: false, timeout: 6000, maximumAge: 5000 }
+          );
         },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
       );
     });
   }, []);
@@ -228,9 +243,10 @@ export default function PhotoLocationCapture({
     ctx.fillStyle = "#38BDF8"; // Cyan highlight for GPS
     ctx.fillText(gpsStr, 16, bannerY + 40);
 
-    // Line 3: Truncated readable address up to ~68 chars
-    const addr = coords.address || resolvedAddress || "Detecting live street address...";
-    const truncatedAddr = addr.length > 68 ? addr.slice(0, 65) + "..." : addr;
+    // Line 3: Truncated readable address up to ~68 chars (includes site/landmark if provided)
+    const baseAddr = coords.address || resolvedAddress || "Detecting live street address...";
+    const combinedAddr = locationLabel ? `${locationLabel}, ${baseAddr}` : baseAddr;
+    const truncatedAddr = combinedAddr.length > 68 ? combinedAddr.slice(0, 65) + "..." : combinedAddr;
     ctx.font = "11px sans-serif";
     ctx.fillStyle = "#E2E8F0";
     ctx.fillText(`LOC: ${truncatedAddr}`, 16, bannerY + 58);
@@ -786,22 +802,42 @@ export default function PhotoLocationCapture({
                   Lat: {latitude.toFixed(6)}<br />
                   Lng: {longitude.toFixed(6)}
                 </div>
-                {resolvedAddress ? (
-                  <div className="text-[11px] text-emerald-950 bg-white/80 p-2 rounded-lg border border-emerald-200/80 leading-snug">
-                    <span className="font-bold text-emerald-900">📍 Live Address:</span> {resolvedAddress}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-emerald-950">
+                    <span className="flex items-center gap-1">📍 Exact Live Street Address</span>
+                    <span className="text-[10px] font-normal text-emerald-700 bg-white/60 px-1.5 py-0.5 rounded border border-emerald-200">
+                      Auto-detected • Editable
+                    </span>
                   </div>
-                ) : (
-                  <div className="text-[11px] text-emerald-700 italic">
-                    Resolving live address...
-                  </div>
-                )}
+                  <textarea
+                    rows={2}
+                    value={resolvedAddress}
+                    onChange={(e) => {
+                      const updated = e.target.value;
+                      setResolvedAddress(updated);
+                      onChange({
+                        photoDataUrl,
+                        latitude,
+                        longitude,
+                        locationLabel,
+                        locationAddress: updated,
+                      });
+                    }}
+                    placeholder="Auto-detecting live street address..."
+                    className="w-full p-2 text-xs bg-white text-slate-900 rounded-lg border border-emerald-300 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/30 leading-snug font-medium shadow-2xs resize-none"
+                  />
+                  <p className="text-[10px] text-emerald-700 leading-tight">
+                    Confirm or refine Door No / Building / Street above. This is burned permanently onto your selfie and legal PDF certificate.
+                  </p>
+                </div>
+
                 <a
                   href={`https://maps.google.com/?q=${latitude},${longitude}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block text-[11px] text-emerald-800 underline font-medium hover:text-emerald-950"
+                  className="inline-block text-[11px] text-emerald-800 underline font-medium hover:text-emerald-950 pt-0.5"
                 >
-                  View on Google Maps ↗
+                  Verify GPS Pin on Google Maps ↗
                 </a>
               </div>
             ) : (
@@ -812,11 +848,11 @@ export default function PhotoLocationCapture({
 
             <div className="space-y-1">
               <label className="text-[11px] font-semibold text-slate-600">
-                Site / Office / Landmark (Optional)
+                Building / Site / Flat No. (Optional)
               </label>
               <input
                 type="text"
-                placeholder="e.g. Standard Roofs Fabrication Yard"
+                placeholder="e.g. Standard Roofs Works, Shed #3"
                 value={locationLabel}
                 onChange={(e) =>
                   onChange({
