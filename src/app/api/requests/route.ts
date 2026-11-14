@@ -131,25 +131,15 @@ export async function POST(req: Request) {
         ? Boolean(body.requirePhotoLocation)
         : template.requirePhotoLocation;
 
-    const origin = req.headers.get("origin") || "";
-    let originHost = "";
-    if (origin) {
-      try {
-        originHost = new URL(origin).host;
-      } catch {}
-    }
-
     const orgUrl = user.activeOrg.publicBaseUrl?.trim() || "";
     const settingsUrl = settings?.publicBaseUrl?.trim() || "";
     const configuredUrl = orgUrl || settingsUrl;
 
+    // Use configured public URL if present (so signers receive a real public https link on WhatsApp/SMS).
+    // Only fall back to origin or localhost if no public URL is configured.
     let rawBaseUrl = configuredUrl;
-    // Fall back to actual origin if configured URL is empty or an outdated trycloudflare domain
-    if (
-      !rawBaseUrl ||
-      (rawBaseUrl.includes("trycloudflare.com") && originHost && !rawBaseUrl.includes(originHost))
-    ) {
-      rawBaseUrl = origin || configuredUrl || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3030";
+    if (!rawBaseUrl) {
+      rawBaseUrl = req.headers.get("origin") || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3030";
     }
     const baseUrl = rawBaseUrl.replace(/\/+$/, "");
 
