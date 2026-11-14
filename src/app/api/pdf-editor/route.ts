@@ -6,6 +6,22 @@ import { normalizePdfBuffer } from "@/lib/pdf";
 import { savePdfBuffer } from "@/lib/storage";
 import { ROLE_COLORS } from "@/lib/types";
 
+export interface TextLineEdit {
+  pageNumber: number;
+  normX: number;
+  normY: number;
+  normW: number;
+  normH: number;
+  originalText: string;
+  newText: string;
+  isDeleted: boolean;
+  fontSize?: number;
+  fontFamily?: "Helvetica" | "Times" | "Courier";
+  color?: string;
+  isBold?: boolean;
+  isItalic?: boolean;
+}
+
 export interface EditorElement {
   id: string;
   pageNumber: number; // 1-based original page number
@@ -29,6 +45,7 @@ export interface EditorPayload {
   deletedPages?: number[];
   rotations?: Record<string, number>; // pageNumber -> degrees (90, 180, 270)
   elements?: EditorElement[];
+  textEdits?: TextLineEdit[];
 }
 
 function parseHexColor(hex?: string, defaultColor = { r: 0, g: 0, b: 0 }) {
@@ -102,6 +119,7 @@ export async function POST(req: Request) {
       deletedPages: [],
       rotations: {},
       elements: [],
+      textEdits: [],
     };
 
     if (editsRaw) {
@@ -144,11 +162,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Map original 1-based page numbers to their current index after page deletions
-    // We first apply elements to the pages *before* deleting, or map them properly.
-    // Applying edits to the pages while they still have original indices is cleanest!
-
-    // 1. Embed common fonts
+    // Embed common fonts
     const fontCache = new Map<StandardFonts, any>();
     async function getFont(sf: StandardFonts) {
       if (!fontCache.has(sf)) {
@@ -157,7 +171,52 @@ export async function POST(req: Request) {
       return fontCache.get(sf);
     }
 
-    // 2. Apply Visual Elements (whiteout, text, stamp, signature, highlight)
+    // 1. Apply Direct In-Place Text Line Edits (Word-style text editing & removal)
+    if (parsedEdits.textEdits && parsedEdits.textEdits.length > 0) {
+      for (const edit of parsedEdits.textEdits) {
+        const pageIdx = edit.pageNumber - 1;
+        if (pageIdx < 0 || pageIdx >= totalPagesOriginal) continue;
+
+        const page = merged.getPage(pageIdx);
+        const { width: pdfW, height: pdfH } = page.getSize();
+
+        const boxW = Math.max(4, edit.normW * pdfW);
+        const boxH = Math.max(4, edit.normH * pdfH);
+        const boxX = edit.normX * pdfW;
+        const boxY = pdfH - (edit.normY * pdfH) - boxH;
+
+        // Whiteout the original text with a small padding so it is completely removed
+        page.drawRectangle({
+          x: Math.max(0, boxX - 1.5),
+          y: Math.max(0, boxY - 1.5),
+          width: boxW + 3,
+          height: boxH + 3,
+          color: rgb(1, 1, 1),
+          opacity: 1,
+        });
+
+        // If not deleted and user entered replacement text, draw the new text
+        if (!edit.isDeleted && edit.newText && edit.newText.trim().length > 0) {
+          const fontChoice = selectFont(edit.fontFamily, edit.isBold, edit.isItalic);
+          const font = await getFont(fontChoice);
+          const fontSize = Math.max(7, Math.min(72, edit.fontSize || Math.round(boxH * 0.75)));
+          const textColor = parseHexColor(edit.color, { r: 0.05, g: 0.08, b: 0.15 });
+
+          // In PDF, y is baseline
+          const textY = boxY + Math.max(1, boxH * 0.22);
+
+          page.drawText(edit.newText, {
+            x: boxX,
+            y: textY,
+            size: fontSize,
+            font,
+            color: textColor,
+          });
+        }
+      }
+    }
+
+    // 2. Apply Custom Added Visual Elements (whiteout, text, stamp, signature, highlight)
     if (parsedEdits.elements && parsedEdits.elements.length > 0) {
       for (const elem of parsedEdits.elements) {
         const pageIdx = elem.pageNumber - 1;
@@ -166,16 +225,12 @@ export async function POST(req: Request) {
         const page = merged.getPage(pageIdx);
         const { width: pdfW, height: pdfH } = page.getSize();
 
-        // Calculate PDF point coordinates
-        // elem.normX, normY are top-left relative [0..1]
         const w = Math.max(2, (elem.normW || 0.1) * pdfW);
         const h = Math.max(2, (elem.normH || 0.05) * pdfH);
         const x = (elem.normX || 0) * pdfW;
-        // In PDF coordinates, (0,0) is bottom-left
         const y = pdfH - ((elem.normY || 0) * pdfH) - h;
 
         if (elem.type === "whiteout") {
-          // Solid white rectangle erasing whatever is underneath
           page.drawRectangle({
             x,
             y,
@@ -185,7 +240,6 @@ export async function POST(req: Request) {
             opacity: 1,
           });
         } else if (elem.type === "highlight") {
-          // Semi-transparent highlight box
           page.drawRectangle({
             x,
             y,
@@ -216,11 +270,10 @@ export async function POST(req: Request) {
           }
         } else if (elem.type === "stamp") {
           const stampLabel = (elem.stampText || elem.text || "APPROVED").toUpperCase();
-          const stampHex = elem.stampColor || elem.color || "#15803d";
+          const stampHex = elem.stampColor || elem.color || "#16a34a";
           const stampCol = parseHexColor(stampHex, { r: 0.08, g: 0.5, b: 0.24 });
           const stampFont = await getFont(StandardFonts.HelveticaBold);
 
-          // Draw stamp border
           page.drawRectangle({
             x,
             y,
@@ -232,7 +285,6 @@ export async function POST(req: Request) {
             opacity: 0.92,
           });
 
-          // Draw stamp inner text
           const fontSize = Math.max(9, Math.min(24, Math.floor(h * 0.45)));
           const textW = stampFont.widthOfTextAtSize(stampLabel, fontSize);
           const textX = Math.max(x + 4, x + (w - textW) / 2);
@@ -265,7 +317,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Apply Optional Header Note on each page
+    // 3. Apply Optional Header Note
     if (headerNote) {
       const font = await getFont(StandardFonts.HelveticaBold);
       for (const page of merged.getPages()) {
@@ -299,7 +351,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5. Remove Deleted Pages (in descending order so indices remain stable)
+    // 5. Remove Deleted Pages
     if (parsedEdits.deletedPages && parsedEdits.deletedPages.length > 0) {
       const toRemove = Array.from(
         new Set(
@@ -309,7 +361,6 @@ export async function POST(req: Request) {
         )
       ).sort((a, b) => b - a);
 
-      // Keep at least 1 page
       if (toRemove.length < merged.getPageCount()) {
         for (const pNum of toRemove) {
           merged.removePage(pNum - 1);

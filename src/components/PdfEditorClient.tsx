@@ -24,28 +24,47 @@ import {
   X,
   FileText,
   FileEdit,
-  Eye,
   RefreshCw,
-  ShieldCheck,
   Check,
+  Plus,
+  Sparkles,
+  Edit3,
 } from "lucide-react";
 
 export type EditorTool =
-  | "select"
+  | "edit-text"
+  | "add-text"
   | "whiteout"
-  | "text"
   | "signature"
   | "stamp"
   | "highlight";
 
-export interface EditorElement {
+export interface EditableTextLine {
   id: string;
-  pageNumber: number; // 1-based
-  type: "whiteout" | "text" | "stamp" | "signature" | "highlight";
+  pageNumber: number;
+  originalText: string;
+  currentText: string;
+  isEdited: boolean;
+  isDeleted: boolean;
+  fontSize: number;
+  fontFamily: "Helvetica" | "Times" | "Courier";
+  color: string;
+  isBold: boolean;
+  isItalic: boolean;
   normX: number; // 0..1
   normY: number; // 0..1
   normW: number; // 0..1
   normH: number; // 0..1
+}
+
+export interface CustomElement {
+  id: string;
+  pageNumber: number;
+  type: "whiteout" | "text" | "stamp" | "signature" | "highlight";
+  normX: number;
+  normY: number;
+  normW: number;
+  normH: number;
   text?: string;
   fontSize?: number;
   fontFamily?: "Helvetica" | "Times" | "Courier";
@@ -88,24 +107,23 @@ const FONT_SIZES = [10, 12, 14, 16, 18, 22, 28, 36];
 export default function PdfEditorClient() {
   const router = useRouter();
 
-  // File & Rendering State
+  // File & Page Rendering State
   const [file, setFile] = useState<File | null>(null);
   const [docName, setDocName] = useState("Edited_Document");
   const [pages, setPages] = useState<RenderedPage[]>([]);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
-  // Active Tool & Selection State
-  const [activeTool, setActiveTool] = useState<EditorTool>("select");
-  const [elements, setElements] = useState<EditorElement[]>([]);
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  // Extracted Original Text Lines (Word-Style In-Place Text Editing)
+  const [textLines, setTextLines] = useState<EditableTextLine[]>([]);
+  const [activeEditingLineId, setActiveEditingLineId] = useState<string | null>(null);
 
-  // Text Tool Styling State
-  const [textColor, setTextColor] = useState("#000000");
-  const [fontSize, setFontSize] = useState(14);
-  const [fontFamily, setFontFamily] = useState<"Helvetica" | "Times" | "Courier">("Helvetica");
-  const [isBold, setIsBold] = useState(false);
-  const [isItalic, setIsItalic] = useState(false);
+  // Custom User-Placed Elements (Whiteout boxes, new text, stamps, signatures)
+  const [customElements, setCustomElements] = useState<CustomElement[]>([]);
+  const [selectedCustomElemId, setSelectedCustomElemId] = useState<string | null>(null);
+
+  // Active Tool Mode
+  const [activeTool, setActiveTool] = useState<EditorTool>("edit-text");
 
   // Stamp Tool State
   const [stampText, setStampText] = useState("APPROVED");
@@ -115,17 +133,17 @@ export default function PdfEditorClient() {
   const [sigModalOpen, setSigModalOpen] = useState(false);
   const [preparedSigDataUrl, setPreparedSigDataUrl] = useState<string | null>(null);
 
-  // Page Operations State
+  // Page Operations & Zoom
   const [deletedPages, setDeletedPages] = useState<number[]>([]);
   const [rotations, setRotations] = useState<Record<number, number>>({});
   const [zoomScale, setZoomScale] = useState(1.0);
 
-  // Action status
+  // Status & Notifications
   const [exporting, setExporting] = useState(false);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
 
-  // Dragging / Resizing State
+  // Dragging / Resizing State for Custom Elements
   const dragRef = useRef<{
     id: string;
     mode: "move" | "resize";
@@ -140,26 +158,94 @@ export default function PdfEditorClient() {
     hasMoved: boolean;
   } | null>(null);
 
-  // Canvas Drawing for creating new Whiteout/Highlight
-  const drawNewRef = useRef<{
-    pageNumber: number;
-    tool: EditorTool;
-    startX: number;
-    startY: number;
-    rectW: number;
-    rectH: number;
-    tempId: string;
-  } | null>(null);
+  // Group extracted PDF text items into cohesive lines
+  const groupTextIntoLines = (
+    items: any[],
+    pageW: number,
+    pageH: number,
+    pageNum: number
+  ): EditableTextLine[] => {
+    const valid = items.filter(
+      (it) => typeof it.str === "string" && it.str.trim().length > 0 && it.transform
+    );
 
-  // Load and Render PDF with pdfjs-dist
+    // Sort top-to-bottom (Y descending in PDF), then left-to-right (X ascending)
+    const sorted = [...valid].sort((a, b) => {
+      const yDiff = b.transform[5] - a.transform[5];
+      if (Math.abs(yDiff) > 3.5) return yDiff;
+      return a.transform[4] - b.transform[4];
+    });
+
+    const rawLines: {
+      text: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      fontSize: number;
+    }[] = [];
+
+    for (const it of sorted) {
+      const itX = it.transform[4];
+      const itY = it.transform[5];
+      const itFs = Math.round(Math.hypot(it.transform[0], it.transform[1])) || 12;
+      const itH = it.height || itFs;
+      const itW = it.width || it.str.length * itFs * 0.55;
+
+      const last = rawLines[rawLines.length - 1];
+      if (
+        last &&
+        Math.abs(last.y - itY) <= 4.5 &&
+        itX >= last.x - 4 &&
+        itX <= last.x + last.w + itFs * 2.2
+      ) {
+        const spaceNeeded =
+          !last.text.endsWith(" ") && !it.str.startsWith(" ") ? " " : "";
+        last.text += spaceNeeded + it.str;
+        last.w = itX + itW - last.x;
+        last.h = Math.max(last.h, itH);
+      } else {
+        rawLines.push({
+          text: it.str,
+          x: itX,
+          y: itY,
+          w: itW,
+          h: itH,
+          fontSize: itFs,
+        });
+      }
+    }
+
+    return rawLines.map((l, idx) => ({
+      id: `p${pageNum}_line_${idx}`,
+      pageNumber: pageNum,
+      originalText: l.text,
+      currentText: l.text,
+      isEdited: false,
+      isDeleted: false,
+      fontSize: Math.max(9, Math.min(48, l.fontSize)),
+      fontFamily: "Helvetica",
+      color: "#0f172a",
+      isBold: false,
+      isItalic: false,
+      normX: Math.max(0, (l.x - 2) / pageW),
+      normY: Math.max(0, (pageH - (l.y + l.h * 1.05)) / pageH),
+      normW: Math.min(1, (l.w + 6) / pageW),
+      normH: Math.min(1, (l.h * 1.35) / pageH),
+    }));
+  };
+
+  // Load and Render PDF with pdfjs-dist & extract live text content
   const renderPdfFile = useCallback(async (selectedFile: File) => {
     try {
       setLoadingPdf(true);
       setPdfError(null);
-      setElements([]);
+      setTextLines([]);
+      setCustomElements([]);
       setDeletedPages([]);
       setRotations({});
-      setSelectedElementId(null);
+      setActiveEditingLineId(null);
+      setSelectedCustomElemId(null);
 
       const arrayBuffer = await selectedFile.arrayBuffer();
       const pdfjsLib = await import("pdfjs-dist");
@@ -171,6 +257,8 @@ export default function PdfEditorClient() {
       const pdf = await loadingTask.promise;
 
       const rendered: RenderedPage[] = [];
+      const extractedLines: EditableTextLine[] = [];
+
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const baseViewport = page.getViewport({ scale: 1 });
@@ -178,6 +266,7 @@ export default function PdfEditorClient() {
         const scale = targetWidth / baseViewport.width;
         const viewport = page.getViewport({ scale });
 
+        // 1. Render visual canvas
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
         if (!ctx) continue;
@@ -192,9 +281,24 @@ export default function PdfEditorClient() {
           height: canvas.height,
           dataUrl: canvas.toDataURL("image/png"),
         });
+
+        // 2. Extract text items & group into editable lines
+        try {
+          const textContent = await page.getTextContent();
+          const pageLines = groupTextIntoLines(
+            textContent.items,
+            baseViewport.width,
+            baseViewport.height,
+            i
+          );
+          extractedLines.push(...pageLines);
+        } catch (textErr) {
+          console.warn(`Could not extract text from page ${i}:`, textErr);
+        }
       }
 
       setPages(rendered);
+      setTextLines(extractedLines);
       const baseName = selectedFile.name.replace(/\.pdf$/i, "");
       setDocName(`${baseName}_edited`);
     } catch (err) {
@@ -229,21 +333,27 @@ export default function PdfEditorClient() {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (selectedElementId) {
+        if (selectedCustomElemId) {
           e.preventDefault();
-          setElements((prev) => prev.filter((el) => el.id !== selectedElementId));
-          setSelectedElementId(null);
+          setCustomElements((prev) => prev.filter((el) => el.id !== selectedCustomElemId));
+          setSelectedCustomElemId(null);
+        } else if (activeEditingLineId) {
+          e.preventDefault();
+          setTextLines((prev) =>
+            prev.map((l) => (l.id === activeEditingLineId ? { ...l, isDeleted: true, isEdited: true } : l))
+          );
         }
       } else if (e.key === "Escape") {
-        setSelectedElementId(null);
-        setActiveTool("select");
+        setActiveEditingLineId(null);
+        setSelectedCustomElemId(null);
+        setActiveTool("edit-text");
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedElementId]);
+  }, [selectedCustomElemId, activeEditingLineId]);
 
-  // Global mouse move & up listeners for dragging/resizing
+  // Pointer move & up listeners for dragging/resizing custom elements
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
       if (!dragRef.current) return;
@@ -267,7 +377,7 @@ export default function PdfEditorClient() {
         dragRef.current.hasMoved = true;
       }
 
-      setElements((prev) =>
+      setCustomElements((prev) =>
         prev.map((el) => {
           if (el.id !== id) return el;
           if (mode === "move") {
@@ -275,7 +385,6 @@ export default function PdfEditorClient() {
             const newY = Math.max(0, Math.min(1 - el.normH, origNormY + deltaY));
             return { ...el, normX: newX, normY: newY };
           } else {
-            // resize
             const minW = 20 / containerW;
             const minH = 14 / containerH;
             const newW = Math.max(minW, Math.min(1 - origNormX, origNormW + deltaX));
@@ -298,115 +407,138 @@ export default function PdfEditorClient() {
     };
   }, []);
 
-  // Page Click Handler for placing elements
-  function handlePageClick(
+  // Update existing line
+  function updateTextLine(lineId: string, patch: Partial<EditableTextLine>) {
+    setTextLines((prev) =>
+      prev.map((l) => {
+        if (l.id !== lineId) return l;
+        const updated = { ...l, ...patch, isEdited: true };
+        return updated;
+      })
+    );
+  }
+
+  // Delete line
+  function deleteTextLine(lineId: string) {
+    setTextLines((prev) =>
+      prev.map((l) => (l.id === lineId ? { ...l, isDeleted: true, isEdited: true } : l))
+    );
+    if (activeEditingLineId === lineId) {
+      setActiveEditingLineId(null);
+    }
+  }
+
+  // Restore line
+  function restoreTextLine(lineId: string) {
+    setTextLines((prev) =>
+      prev.map((l) =>
+        l.id === lineId
+          ? {
+              ...l,
+              isDeleted: false,
+              currentText: l.originalText,
+              isEdited: false,
+            }
+          : l
+      )
+    );
+  }
+
+  // Click on canvas to add new custom elements
+  function handlePageCanvasClick(
     e: React.MouseEvent<HTMLDivElement>,
-    pageNumber: number,
-    containerW: number,
-    containerH: number
+    pageNumber: number
   ) {
-    if (activeTool === "select") return;
+    if (activeTool === "edit-text") {
+      setActiveEditingLineId(null);
+      setSelectedCustomElemId(null);
+      return;
+    }
 
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = (e.clientX - rect.left) / rect.width;
     const clickY = (e.clientY - rect.top) / rect.height;
-
     const newId = `elem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    if (activeTool === "whiteout") {
-      // Place default whiteout box
-      const defaultW = Math.min(0.35, 1 - clickX);
-      const defaultH = Math.min(0.045, 1 - clickY);
-      const newElem: EditorElement = {
-        id: newId,
-        pageNumber,
-        type: "whiteout",
-        normX: Math.max(0, clickX - 0.02),
-        normY: Math.max(0, clickY - 0.01),
-        normW: defaultW,
-        normH: defaultH,
-      };
-      setElements((prev) => [...prev, newElem]);
-      setSelectedElementId(newId);
-      setActiveTool("select");
-    } else if (activeTool === "text") {
-      // Place editable text box
-      const defaultW = Math.min(0.32, 1 - clickX);
-      const defaultH = Math.min(0.05, 1 - clickY);
-      const newElem: EditorElement = {
+    if (activeTool === "add-text") {
+      const newElem: CustomElement = {
         id: newId,
         pageNumber,
         type: "text",
         normX: clickX,
         normY: clickY,
-        normW: defaultW,
-        normH: defaultH,
-        text: "Click or double click to type",
-        fontSize,
-        fontFamily,
-        color: textColor,
-        isBold,
-        isItalic,
+        normW: Math.min(0.35, 1 - clickX),
+        normH: 0.05,
+        text: "New text line...",
+        fontSize: 14,
+        fontFamily: "Helvetica",
+        color: "#0f172a",
+        isBold: false,
+        isItalic: false,
       };
-      setElements((prev) => [...prev, newElem]);
-      setSelectedElementId(newId);
-      setActiveTool("select");
+      setCustomElements((prev) => [...prev, newElem]);
+      setSelectedCustomElemId(newId);
+      setActiveTool("edit-text");
+    } else if (activeTool === "whiteout") {
+      const newElem: CustomElement = {
+        id: newId,
+        pageNumber,
+        type: "whiteout",
+        normX: clickX,
+        normY: clickY,
+        normW: Math.min(0.3, 1 - clickX),
+        normH: 0.05,
+      };
+      setCustomElements((prev) => [...prev, newElem]);
+      setSelectedCustomElemId(newId);
+      setActiveTool("edit-text");
     } else if (activeTool === "stamp") {
-      // Place stamp badge
-      const defaultW = Math.min(0.24, 1 - clickX);
-      const defaultH = Math.min(0.065, 1 - clickY);
-      const newElem: EditorElement = {
+      const newElem: CustomElement = {
         id: newId,
         pageNumber,
         type: "stamp",
         normX: clickX,
         normY: clickY,
-        normW: defaultW,
-        normH: defaultH,
+        normW: Math.min(0.25, 1 - clickX),
+        normH: 0.065,
         stampText,
         stampColor,
       };
-      setElements((prev) => [...prev, newElem]);
-      setSelectedElementId(newId);
-      setActiveTool("select");
+      setCustomElements((prev) => [...prev, newElem]);
+      setSelectedCustomElemId(newId);
+      setActiveTool("edit-text");
     } else if (activeTool === "signature") {
       if (preparedSigDataUrl) {
-        // Place signature image
-        const defaultW = Math.min(0.26, 1 - clickX);
-        const defaultH = Math.min(0.09, 1 - clickY);
-        const newElem: EditorElement = {
+        const newElem: CustomElement = {
           id: newId,
           pageNumber,
           type: "signature",
           normX: clickX,
           normY: clickY,
-          normW: defaultW,
-          normH: defaultH,
+          normW: Math.min(0.26, 1 - clickX),
+          normH: 0.09,
           dataUrl: preparedSigDataUrl,
         };
-        setElements((prev) => [...prev, newElem]);
-        setSelectedElementId(newId);
-        setActiveTool("select");
+        setCustomElements((prev) => [...prev, newElem]);
+        setSelectedCustomElemId(newId);
+        setActiveTool("edit-text");
       } else {
-        // Prompt to draw signature first
         setSigModalOpen(true);
       }
     } else if (activeTool === "highlight") {
-      const defaultW = Math.min(0.3, 1 - clickX);
-      const defaultH = Math.min(0.035, 1 - clickY);
-      const newElem: EditorElement = {
+      const newElem: CustomElement = {
         id: newId,
         pageNumber,
         type: "highlight",
         normX: clickX,
         normY: clickY,
-        normW: defaultW,
-        normH: defaultH,
+        normW: Math.min(0.32, 1 - clickX),
+        normH: 0.035,
         color: "#facc15",
       };
-      setElements((prev) => [...prev, newElem]);
-      setSelectedElementId(newId);
-      setActiveTool("select");
+      setCustomElements((prev) => [...prev, newElem]);
+      setSelectedCustomElemId(newId);
+      setActiveTool("edit-text");
     }
   }
 
@@ -438,11 +570,30 @@ export default function PdfEditorClient() {
       formData.append("name", docName);
       formData.append("saveAsTemplate", saveAsTemplate ? "true" : "false");
 
+      // Filter only modified or deleted lines to send to backend
+      const modifiedLines = textLines.filter((l) => l.isEdited || l.isDeleted);
+
       const editsPayload = {
         deletedPages,
         rotations,
-        elements,
+        textEdits: modifiedLines.map((l) => ({
+          pageNumber: l.pageNumber,
+          normX: l.normX,
+          normY: l.normY,
+          normW: l.normW,
+          normH: l.normH,
+          originalText: l.originalText,
+          newText: l.currentText,
+          isDeleted: l.isDeleted,
+          fontSize: l.fontSize,
+          fontFamily: l.fontFamily,
+          color: l.color,
+          isBold: l.isBold,
+          isItalic: l.isItalic,
+        })),
+        elements: customElements,
       };
+
       formData.append("edits", JSON.stringify(editsPayload));
 
       const res = await fetch("/api/pdf-editor", {
@@ -471,7 +622,7 @@ export default function PdfEditorClient() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        setSuccessNotice("Edited PDF downloaded successfully!");
+        setSuccessNotice("Edited PDF downloaded successfully with all text changes applied!");
       }
     } catch (err: any) {
       console.error("Export error:", err);
@@ -481,34 +632,26 @@ export default function PdfEditorClient() {
     }
   }
 
-  const selectedElement = elements.find((el) => el.id === selectedElementId) || null;
-
-  // Selected Element Updates
-  function updateSelectedElement(patch: Partial<EditorElement>) {
-    if (!selectedElementId) return;
-    setElements((prev) =>
-      prev.map((el) => (el.id === selectedElementId ? { ...el, ...patch } : el))
-    );
-  }
+  const activeLine = textLines.find((l) => l.id === activeEditingLineId) || null;
+  const editedCount = textLines.filter((l) => l.isEdited && !l.isDeleted).length;
+  const deletedCount = textLines.filter((l) => l.isDeleted).length;
 
   // EMPTY STATE: Upload View
   if (!file || pages.length === 0) {
     return (
       <div className="max-w-4xl mx-auto space-y-8 py-6">
-        {/* Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-100/70 text-red-800 text-xs font-semibold uppercase tracking-wider">
-            <FileEdit className="w-3.5 h-3.5" /> Full Visual PDF Editor
+            <Sparkles className="w-3.5 h-3.5" /> Word-Style Real PDF Editor
           </div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">
-            Edit, Erase, Re-Type &amp; Sign Any PDF
+            Click Any Text in Your PDF to Edit or Remove It
           </h1>
           <p className="text-sm text-slate-600 max-w-xl mx-auto">
-            Upload any contract, invoice, or document. Erase unwanted text &amp; prices, type new clauses, stamp approvals, and download in vector clarity.
+            Just like Microsoft Word: upload any PDF, click on any sentence, price, or clause to edit words in place or remove entire lines.
           </p>
         </div>
 
-        {/* Dropzone Card */}
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDropFile}
@@ -530,10 +673,10 @@ export default function PdfEditorClient() {
           </div>
 
           <h3 className="text-lg font-bold text-slate-800 mb-1">
-            {loadingPdf ? "Opening & Rendering PDF..." : "Choose a PDF or Drag & Drop Here"}
+            {loadingPdf ? "Detecting Text & Loading PDF..." : "Choose a PDF or Drag & Drop Here"}
           </h3>
           <p className="text-xs text-slate-500 mb-6 max-w-sm mx-auto">
-            Supports standard multi-page PDFs, scans, policies, and agreements up to 50MB.
+            Loads document text into interactive editable blocks ready for real-time typing.
           </p>
 
           <button
@@ -551,45 +694,34 @@ export default function PdfEditorClient() {
           </div>
         )}
 
-        {/* Feature Highlights Grid */}
-        <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center mb-2.5 font-bold">
-              <Eraser className="w-4 h-4" />
-            </div>
-            <h4 className="font-bold text-slate-800 text-sm mb-1">Whiteout / Eraser</h4>
-            <p className="text-xs text-slate-500">
-              Draw clean opaque patches to delete outdated prices, clauses, or client names.
-            </p>
-          </div>
-
+        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
           <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
             <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center mb-2.5 font-bold">
-              <Type className="w-4 h-4" />
+              <Edit3 className="w-4 h-4" />
             </div>
-            <h4 className="font-bold text-slate-800 text-sm mb-1">Type &amp; Replace</h4>
+            <h4 className="font-bold text-slate-800 text-sm mb-1">1-Click In-Place Text Editing</h4>
             <p className="text-xs text-slate-500">
-              Type fresh replacement text directly over whited-out sections with custom fonts &amp; colors.
+              Click any sentence or line in the PDF and start typing immediately. Replaces words with matching fonts and sizes.
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <div className="w-8 h-8 rounded-lg bg-green-50 text-green-700 flex items-center justify-center mb-2.5 font-bold">
-              <Stamp className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-red-50 text-red-700 flex items-center justify-center mb-2.5 font-bold">
+              <Trash2 className="w-4 h-4" />
             </div>
-            <h4 className="font-bold text-slate-800 text-sm mb-1">Stamps &amp; Signatures</h4>
+            <h4 className="font-bold text-slate-800 text-sm mb-1">Remove Lines &amp; Clauses</h4>
             <p className="text-xs text-slate-500">
-              Place official APPROVED or CONFIDENTIAL stamps and draw or place signatures.
+              Click the trash icon or delete text to permanently erase lines or paragraphs like in Word.
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center mb-2.5 font-bold">
-              <RotateCw className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center mb-2.5 font-bold">
+              <Download className="w-4 h-4" />
             </div>
-            <h4 className="font-bold text-slate-800 text-sm mb-1">Delete &amp; Rotate</h4>
+            <h4 className="font-bold text-slate-800 text-sm mb-1">Vector PDF Download</h4>
             <p className="text-xs text-slate-500">
-              Delete unwanted pages with 1-click and rotate sideways scans upright.
+              Exports clean, searchable vector PDF with zero blurriness or compression artifacts.
             </p>
           </div>
         </div>
@@ -597,12 +729,12 @@ export default function PdfEditorClient() {
     );
   }
 
-  // ACTIVE EDITOR VIEW
+  // ACTIVE WORD-STYLE PDF EDITOR VIEW
   return (
     <div className="space-y-4">
       {/* TOP HEADER CONTROLS */}
       <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3">
-        {/* Left: Document Name & File info */}
+        {/* Left: Document Name & Edit Counters */}
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-red-50 text-red-800 border border-red-200 flex items-center justify-center shrink-0">
             <FileText className="w-5 h-5" />
@@ -614,13 +746,21 @@ export default function PdfEditorClient() {
                 value={docName}
                 onChange={(e) => setDocName(e.target.value)}
                 className="font-bold text-sm text-slate-900 border-b border-transparent hover:border-slate-300 focus:border-red-700 focus:outline-hidden px-1 py-0.5 rounded"
-                title="Click to rename output file"
+                title="Click to rename document"
               />
               <span className="text-xs text-slate-400">.pdf</span>
             </div>
-            <div className="text-xs text-slate-500">
-              {pages.length} page(s) • {elements.length} edit(s)
-              {deletedPages.length > 0 && ` • ${deletedPages.length} deleted`}
+            <div className="text-xs text-slate-500 flex items-center gap-2">
+              <span>{pages.length} page(s)</span>
+              {editedCount > 0 && (
+                <span className="text-blue-700 font-semibold">• {editedCount} text edited</span>
+              )}
+              {deletedCount > 0 && (
+                <span className="text-red-700 font-semibold">• {deletedCount} line(s) removed</span>
+              )}
+              {customElements.length > 0 && (
+                <span className="text-purple-700 font-semibold">• {customElements.length} element(s)</span>
+              )}
             </div>
           </div>
         </div>
@@ -629,16 +769,30 @@ export default function PdfEditorClient() {
         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
           <button
             type="button"
-            onClick={() => setActiveTool("select")}
+            onClick={() => setActiveTool("edit-text")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-              activeTool === "select"
-                ? "bg-white text-slate-900 shadow-xs"
+              activeTool === "edit-text"
+                ? "bg-blue-600 text-white shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}
-            title="Select & Move placed items (Esc)"
+            title="Click any text in the document to edit or remove it (Word style)"
           >
-            <MousePointer className="w-3.5 h-3.5" />
-            <span>Select</span>
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>Click &amp; Edit Text</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTool("add-text")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              activeTool === "add-text"
+                ? "bg-indigo-600 text-white shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+            title="Click anywhere to add brand new text"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add New Text</span>
           </button>
 
           <button
@@ -649,24 +803,10 @@ export default function PdfEditorClient() {
                 ? "bg-amber-500 text-white shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}
-            title="Erase/Whiteout text or numbers"
+            title="Erase or whiteout any box/table/logo"
           >
             <Eraser className="w-3.5 h-3.5" />
             <span>Whiteout</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTool("text")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-              activeTool === "text"
-                ? "bg-blue-600 text-white shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-            title="Click to add or re-type text"
-          >
-            <Type className="w-3.5 h-3.5" />
-            <span>Re-Type</span>
           </button>
 
           <button
@@ -717,7 +857,7 @@ export default function PdfEditorClient() {
 
         {/* Right: Zoom & Export Action buttons */}
         <div className="flex items-center gap-2">
-          {/* Zoom Controls */}
+          {/* Zoom */}
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium text-slate-600">
             <button
               type="button"
@@ -750,10 +890,10 @@ export default function PdfEditorClient() {
             ) : (
               <Download className="w-4 h-4" />
             )}
-            <span>Download PDF</span>
+            <span>Download Edited PDF</span>
           </button>
 
-          {/* Save & Send for Signature */}
+          {/* Send for e-Sign */}
           <button
             type="button"
             disabled={exporting}
@@ -764,7 +904,7 @@ export default function PdfEditorClient() {
             <span>Send for e-Sign</span>
           </button>
 
-          {/* Change File */}
+          {/* Replace PDF */}
           <label
             className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-900 cursor-pointer"
             title="Replace PDF File"
@@ -805,24 +945,23 @@ export default function PdfEditorClient() {
         </div>
       )}
 
-      {/* CONTEXTUAL TOOL PROPERTIES BAR */}
-      <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-        {/* Tool Specific Configs */}
-        {activeTool === "text" || (selectedElement && selectedElement.type === "text") ? (
+      {/* WORD-STYLE FORMATTING TOOLBAR (Appears when editing a line or custom text) */}
+      {activeLine && (
+        <div className="bg-slate-900 text-white border border-slate-800 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="font-bold text-slate-700 flex items-center gap-1">
-              <Type className="w-3.5 h-3.5 text-blue-600" /> Text Style:
+            <span className="font-bold text-blue-300 flex items-center gap-1">
+              <Edit3 className="w-3.5 h-3.5 text-blue-400" /> Editing Line:
             </span>
 
             {/* Font Family */}
             <select
-              value={selectedElement ? selectedElement.fontFamily || "Helvetica" : fontFamily}
-              onChange={(e) => {
-                const fam = e.target.value as "Helvetica" | "Times" | "Courier";
-                setFontFamily(fam);
-                if (selectedElement) updateSelectedElement({ fontFamily: fam });
-              }}
-              className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium"
+              value={activeLine.fontFamily}
+              onChange={(e) =>
+                updateTextLine(activeLine.id, {
+                  fontFamily: e.target.value as "Helvetica" | "Times" | "Courier",
+                })
+              }
+              className="bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1 text-xs"
             >
               <option value="Helvetica">Helvetica (Sans)</option>
               <option value="Times">Times Roman (Serif)</option>
@@ -830,54 +969,56 @@ export default function PdfEditorClient() {
             </select>
 
             {/* Font Size */}
-            <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
-              {FONT_SIZES.map((sz) => (
-                <button
-                  key={sz}
-                  type="button"
-                  onClick={() => {
-                    setFontSize(sz);
-                    if (selectedElement) updateSelectedElement({ fontSize: sz });
-                  }}
-                  className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${
-                    (selectedElement ? selectedElement.fontSize === sz : fontSize === sz)
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  {sz}
-                </button>
-              ))}
+            <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg p-0.5">
+              <button
+                type="button"
+                onClick={() =>
+                  updateTextLine(activeLine.id, {
+                    fontSize: Math.max(8, activeLine.fontSize - 1),
+                  })
+                }
+                className="px-2 py-0.5 text-slate-300 hover:text-white"
+              >
+                -
+              </button>
+              <span className="px-1 font-semibold">{activeLine.fontSize}px</span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateTextLine(activeLine.id, {
+                    fontSize: Math.min(48, activeLine.fontSize + 1),
+                  })
+                }
+                className="px-2 py-0.5 text-slate-300 hover:text-white"
+              >
+                +
+              </button>
             </div>
 
             {/* Bold & Italic */}
-            <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg p-0.5">
+            <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg p-0.5">
               <button
                 type="button"
-                onClick={() => {
-                  const val = selectedElement ? !selectedElement.isBold : !isBold;
-                  setIsBold(val);
-                  if (selectedElement) updateSelectedElement({ isBold: val });
-                }}
+                onClick={() =>
+                  updateTextLine(activeLine.id, { isBold: !activeLine.isBold })
+                }
                 className={`w-6 h-6 flex items-center justify-center rounded font-bold cursor-pointer ${
-                  (selectedElement ? selectedElement.isBold : isBold)
-                    ? "bg-slate-800 text-white"
-                    : "text-slate-600 hover:bg-slate-100"
+                  activeLine.isBold
+                    ? "bg-blue-600 text-white"
+                    : "text-slate-300 hover:text-white"
                 }`}
               >
                 B
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const val = selectedElement ? !selectedElement.isItalic : !isItalic;
-                  setIsItalic(val);
-                  if (selectedElement) updateSelectedElement({ isItalic: val });
-                }}
+                onClick={() =>
+                  updateTextLine(activeLine.id, { isItalic: !activeLine.isItalic })
+                }
                 className={`w-6 h-6 flex items-center justify-center rounded italic font-serif cursor-pointer ${
-                  (selectedElement ? selectedElement.isItalic : isItalic)
-                    ? "bg-slate-800 text-white"
-                    : "text-slate-600 hover:bg-slate-100"
+                  activeLine.isItalic
+                    ? "bg-blue-600 text-white"
+                    : "text-slate-300 hover:text-white"
                 }`}
               >
                 I
@@ -890,105 +1031,57 @@ export default function PdfEditorClient() {
                 <button
                   key={hex}
                   type="button"
-                  onClick={() => {
-                    setTextColor(hex);
-                    if (selectedElement) updateSelectedElement({ color: hex });
-                  }}
-                  className="w-5 h-5 rounded-full border border-slate-300 shadow-2xs transition transform hover:scale-110 cursor-pointer relative"
+                  onClick={() => updateTextLine(activeLine.id, { color: hex })}
+                  className="w-4 h-4 rounded-full border border-slate-600 cursor-pointer relative"
                   style={{ backgroundColor: hex }}
                 >
-                  {(selectedElement ? selectedElement.color === hex : textColor === hex) && (
-                    <Check className="w-3 h-3 text-white absolute inset-0 m-auto" />
+                  {activeLine.color === hex && (
+                    <Check className="w-2.5 h-2.5 text-white absolute inset-0 m-auto" />
                   )}
                 </button>
               ))}
             </div>
           </div>
-        ) : activeTool === "stamp" || (selectedElement && selectedElement.type === "stamp") ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-bold text-slate-700 flex items-center gap-1">
-              <Stamp className="w-3.5 h-3.5 text-purple-600" /> Stamp Type:
-            </span>
-            <div className="flex items-center gap-1.5">
-              {STAMP_PRESETS.map((pst) => (
-                <button
-                  key={pst.text}
-                  type="button"
-                  onClick={() => {
-                    setStampText(pst.text);
-                    setStampColor(pst.color);
-                    if (selectedElement) {
-                      updateSelectedElement({
-                        stampText: pst.text,
-                        stampColor: pst.color,
-                      });
-                    }
-                  }}
-                  className="px-2.5 py-1 rounded-md text-[11px] font-bold border transition cursor-pointer"
-                  style={{
-                    borderColor: pst.color,
-                    color: pst.color,
-                    backgroundColor:
-                      (selectedElement ? selectedElement.stampText === pst.text : stampText === pst.text)
-                        ? `${pst.color}15`
-                        : "transparent",
-                  }}
-                >
-                  {pst.text}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : activeTool === "whiteout" || (selectedElement && selectedElement.type === "whiteout") ? (
-          <div className="flex items-center gap-2 text-slate-600">
-            <Eraser className="w-4 h-4 text-amber-600" />
-            <span className="font-medium">
-              Click anywhere on a page to place an opaque whiteout box. Drag handles to cover outdated prices or clauses.
-            </span>
-          </div>
-        ) : activeTool === "signature" ? (
-          <div className="flex items-center gap-3">
-            <span className="font-bold text-slate-700 flex items-center gap-1">
-              <PenTool className="w-3.5 h-3.5 text-emerald-600" /> Signature Mode:
-            </span>
+
+          {/* Action buttons on the active line */}
+          <div className="flex items-center gap-2">
+            {activeLine.isEdited && (
+              <button
+                type="button"
+                onClick={() => restoreTextLine(activeLine.id)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                title="Reset line to original PDF text"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={() => setSigModalOpen(true)}
-              className="px-3 py-1 bg-white border border-slate-300 rounded-lg hover:border-emerald-600 text-slate-800 font-semibold cursor-pointer"
+              onClick={() => deleteTextLine(activeLine.id)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-900/60 hover:bg-red-800 text-red-200 text-xs font-semibold cursor-pointer"
+              title="Delete this entire line from the PDF (Word-style erase)"
             >
-              {preparedSigDataUrl ? "Redraw Signature" : "Draw / Type Signature"}
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Line</span>
             </button>
-            <span className="text-slate-500">
-              {preparedSigDataUrl ? "Click anywhere on the document to place your signature." : "Click above to draw or type your signature first."}
-            </span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 text-slate-500">
-            <MousePointer className="w-4 h-4" />
-            <span>Click any placed element to move, resize, or delete. Select a tool above to add new edits.</span>
-          </div>
-        )}
 
-        {/* Delete Selected Element Button */}
-        {selectedElement && (
-          <button
-            type="button"
-            onClick={() => {
-              setElements((prev) => prev.filter((el) => el.id !== selectedElementId));
-              setSelectedElementId(null);
-            }}
-            className="flex items-center gap-1 px-3 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 font-semibold transition cursor-pointer ml-auto"
-            title="Delete Selected Item (Delete/Backspace)"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Delete Selected</span>
-          </button>
-        )}
-      </div>
+            <button
+              type="button"
+              onClick={() => setActiveEditingLineId(null)}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs cursor-pointer ml-1"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span>Done</span>
+            </button>
+          </div>
+        </div>
+      )}
 
-      {/* WORKSPACE: LEFT THUMBNAILS + CENTER CANVAS VIEW */}
+      {/* WORKSPACE: LEFT THUMBNAILS + CENTER INTERACTIVE CANVAS */}
       <div className="flex gap-6 items-start">
-        {/* Left Sidebar: Page Thumbnails & Operations */}
+        {/* Left Sidebar: Thumbnails */}
         <div className="w-52 shrink-0 space-y-4 bg-white border border-slate-200 rounded-2xl p-3 shadow-xs max-h-[85vh] overflow-y-auto sticky top-4">
           <div className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
             Pages ({pages.length})
@@ -1008,7 +1101,6 @@ export default function PdfEditorClient() {
                       : "bg-slate-50 border-slate-200 hover:border-slate-400"
                   }`}
                 >
-                  {/* Thumbnail Image */}
                   <div
                     className="overflow-hidden rounded-md bg-white shadow-2xs aspect-[1/1.41] cursor-pointer flex items-center justify-center relative"
                     onClick={() => {
@@ -1034,12 +1126,9 @@ export default function PdfEditorClient() {
                     )}
                   </div>
 
-                  {/* Thumbnail Controls Strip */}
                   <div className="flex items-center justify-between pt-1.5 px-0.5 text-xs">
                     <span className="font-semibold text-slate-700">Page {p.pageNumber}</span>
-
                     <div className="flex items-center gap-1">
-                      {/* Rotate Button */}
                       <button
                         type="button"
                         onClick={() => rotatePage(p.pageNumber)}
@@ -1050,7 +1139,6 @@ export default function PdfEditorClient() {
                         <RotateCw className="w-3.5 h-3.5" />
                       </button>
 
-                      {/* Delete / Restore Button */}
                       <button
                         type="button"
                         onClick={() => toggleDeletePage(p.pageNumber)}
@@ -1080,7 +1168,8 @@ export default function PdfEditorClient() {
           {pages.map((p) => {
             const isDeleted = deletedPages.includes(p.pageNumber);
             const rotation = rotations[p.pageNumber] || 0;
-            const pageElements = elements.filter((el) => el.pageNumber === p.pageNumber);
+            const pageLines = textLines.filter((l) => l.pageNumber === p.pageNumber);
+            const pageCustomElems = customElements.filter((el) => el.pageNumber === p.pageNumber);
 
             return (
               <div
@@ -1093,7 +1182,7 @@ export default function PdfEditorClient() {
                   width: `${Math.round(840 * zoomScale)}px`,
                 }}
               >
-                {/* Page Number Header */}
+                {/* Page Header */}
                 <div className="w-full flex items-center justify-between text-xs font-semibold text-slate-500 mb-2 px-1">
                   <span>
                     PAGE {p.pageNumber} OF {pages.length}
@@ -1114,9 +1203,9 @@ export default function PdfEditorClient() {
                     transform: `rotate(${rotation}deg)`,
                     transition: "transform 0.2s ease-in-out",
                   }}
-                  onClick={(e) => handlePageClick(e, p.pageNumber, p.width, p.height)}
+                  onClick={(e) => handlePageCanvasClick(e, p.pageNumber)}
                 >
-                  {/* Base PDF Background */}
+                  {/* Base PDF Canvas Image */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={p.dataUrl}
@@ -1125,18 +1214,167 @@ export default function PdfEditorClient() {
                     draggable={false}
                   />
 
-                  {/* Visual Edits Overlay */}
-                  <div className="absolute inset-0">
-                    {pageElements.map((elem) => {
-                      const isSelected = elem.id === selectedElementId;
+                  {/* 1. WORD-STYLE IN-PLACE TEXT EDITING LAYER */}
+                  <div className="absolute inset-0 z-20">
+                    {pageLines.map((line) => {
+                      const isEditing = activeEditingLineId === line.id;
+
+                      if (line.isDeleted) {
+                        // Deleted Line: Render solid whiteout over original PDF text with a subtle strikeout
+                        return (
+                          <div
+                            key={line.id}
+                            className="absolute bg-white/95 border border-dashed border-red-300 flex items-center justify-between px-1.5 group cursor-pointer"
+                            style={{
+                              left: `${line.normX * 100}%`,
+                              top: `${line.normY * 100}%`,
+                              width: `${line.normW * 100}%`,
+                              height: `${line.normH * 100}%`,
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              restoreTextLine(line.id);
+                            }}
+                            title="Line Removed. Click to restore original text."
+                          >
+                            <span className="text-[10px] text-red-500 line-through truncate font-mono opacity-60">
+                              {line.originalText}
+                            </span>
+                            <span className="text-[9px] text-emerald-700 bg-emerald-50 px-1 rounded font-bold ml-1 opacity-0 group-hover:opacity-100 transition">
+                              Undo
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      if (isEditing) {
+                        // Currently Active Editable Line: Opaque white cover with live input
+                        return (
+                          <div
+                            key={line.id}
+                            className="absolute bg-white shadow-md ring-2 ring-blue-600 rounded-xs flex items-center px-1 z-30"
+                            style={{
+                              left: `${line.normX * 100}%`,
+                              top: `${line.normY * 100}%`,
+                              width: `${Math.max(line.normW * 100, 25)}%`,
+                              minHeight: `${line.normH * 100}%`,
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="text"
+                              value={line.currentText}
+                              autoFocus
+                              onChange={(e) => {
+                                updateTextLine(line.id, { currentText: e.target.value });
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  setActiveEditingLineId(null);
+                                }
+                              }}
+                              style={{
+                                color: line.color,
+                                fontSize: `${line.fontSize * zoomScale}px`,
+                                fontFamily:
+                                  line.fontFamily === "Times"
+                                    ? "'Times New Roman', serif"
+                                    : line.fontFamily === "Courier"
+                                    ? "Courier, monospace"
+                                    : "Helvetica, Arial, sans-serif",
+                                fontWeight: line.isBold ? "bold" : "normal",
+                                fontStyle: line.isItalic ? "italic" : "normal",
+                              }}
+                              className="w-full bg-transparent border-none outline-hidden p-0 m-0 leading-tight"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => deleteTextLine(line.id)}
+                              className="p-1 text-slate-400 hover:text-red-600 ml-1 cursor-pointer shrink-0"
+                              title="Delete this line"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      if (line.isEdited) {
+                        // Edited Line (Saved): Solid white cover with newly typed text displayed
+                        return (
+                          <div
+                            key={line.id}
+                            className="absolute bg-white border border-blue-400 rounded-xs flex items-center px-1 cursor-pointer group hover:ring-1 hover:ring-blue-500 z-10"
+                            style={{
+                              left: `${line.normX * 100}%`,
+                              top: `${line.normY * 100}%`,
+                              width: `${line.normW * 100}%`,
+                              height: `${line.normH * 100}%`,
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveEditingLineId(line.id);
+                            }}
+                            title="Click to re-edit this modified line"
+                          >
+                            <span
+                              style={{
+                                color: line.color,
+                                fontSize: `${line.fontSize * zoomScale}px`,
+                                fontFamily:
+                                  line.fontFamily === "Times"
+                                    ? "'Times New Roman', serif"
+                                    : line.fontFamily === "Courier"
+                                    ? "Courier, monospace"
+                                    : "Helvetica, Arial, sans-serif",
+                                fontWeight: line.isBold ? "bold" : "normal",
+                                fontStyle: line.isItalic ? "italic" : "normal",
+                              }}
+                              className="truncate leading-tight block w-full"
+                            >
+                              {line.currentText}
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      // Original Line (Unedited): Transparent hover hotspot
+                      return (
+                        <div
+                          key={line.id}
+                          className="absolute bg-transparent hover:bg-blue-500/10 hover:border hover:border-dashed hover:border-blue-500 rounded-xs transition-all cursor-pointer group"
+                          style={{
+                            left: `${line.normX * 100}%`,
+                            top: `${line.normY * 100}%`,
+                            width: `${line.normW * 100}%`,
+                            height: `${line.normH * 100}%`,
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveEditingLineId(line.id);
+                          }}
+                          title={`Click to edit: "${line.originalText}"`}
+                        >
+                          <div className="absolute -top-3.5 right-0 bg-blue-600 text-white text-[9px] font-bold px-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none transition shadow-xs z-30">
+                            Edit
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* 2. CUSTOM USER-PLACED ELEMENTS LAYER (Whiteouts, stamps, signatures, new text) */}
+                  <div className="absolute inset-0 z-30 pointer-events-none">
+                    {pageCustomElems.map((elem) => {
+                      const isSelected = elem.id === selectedCustomElemId;
 
                       return (
                         <div
                           key={elem.id}
-                          className={`absolute group cursor-move ${
+                          className={`absolute group cursor-move pointer-events-auto ${
                             isSelected
-                              ? "ring-2 ring-blue-600 ring-offset-1 z-30"
-                              : "hover:ring-1 hover:ring-blue-400 z-10"
+                              ? "ring-2 ring-blue-600 ring-offset-1 z-40"
+                              : "hover:ring-1 hover:ring-blue-400 z-30"
                           }`}
                           style={{
                             left: `${elem.normX * 100}%`,
@@ -1146,10 +1384,9 @@ export default function PdfEditorClient() {
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedElementId(elem.id);
+                            setSelectedCustomElemId(elem.id);
                           }}
                           onPointerDown={(e) => {
-                            if (activeTool !== "select") return;
                             e.stopPropagation();
                             const container = e.currentTarget.parentElement;
                             if (!container) return;
@@ -1169,10 +1406,9 @@ export default function PdfEditorClient() {
                             };
                           }}
                         >
-                          {/* ELEMENT TYPE CONTENT RENDERING */}
                           {elem.type === "whiteout" ? (
-                            <div className="w-full h-full bg-white border border-dashed border-slate-300 group-hover:border-slate-500 shadow-2xs flex items-center justify-center text-[10px] text-slate-400 select-none">
-                              {isSelected && <span className="opacity-60 font-mono">Eraser</span>}
+                            <div className="w-full h-full bg-white border border-dashed border-slate-300 shadow-2xs flex items-center justify-center text-[10px] text-slate-400 select-none">
+                              {isSelected && <span className="opacity-60 font-mono">Whiteout</span>}
                             </div>
                           ) : elem.type === "highlight" ? (
                             <div
@@ -1181,7 +1417,7 @@ export default function PdfEditorClient() {
                             />
                           ) : elem.type === "text" ? (
                             <div
-                              className="w-full h-full p-1 overflow-hidden flex items-start"
+                              className="w-full h-full p-1 overflow-hidden flex items-start bg-white/90 border border-slate-200 rounded"
                               style={{
                                 color: elem.color || "#000000",
                                 fontSize: `${(elem.fontSize || 14) * zoomScale}px`,
@@ -1199,11 +1435,14 @@ export default function PdfEditorClient() {
                               <textarea
                                 value={elem.text || ""}
                                 onChange={(e) => {
-                                  updateSelectedElement({ text: e.target.value });
+                                  setCustomElements((prev) =>
+                                    prev.map((item) =>
+                                      item.id === elem.id ? { ...item, text: e.target.value } : item
+                                    )
+                                  );
                                 }}
-                                onFocus={() => setSelectedElementId(elem.id)}
                                 className="w-full h-full bg-transparent resize-none border-none outline-hidden p-0 m-0"
-                                placeholder="Type text..."
+                                placeholder="Type new text..."
                               />
                             </div>
                           ) : elem.type === "stamp" ? (
@@ -1228,10 +1467,10 @@ export default function PdfEditorClient() {
                             </div>
                           ) : null}
 
-                          {/* RESIZE HANDLE (Bottom-Right) */}
+                          {/* Resize Handle */}
                           {isSelected && (
                             <div
-                              className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-blue-600 rounded-full border-2 border-white shadow-xs cursor-nwse-resize z-40"
+                              className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 bg-blue-600 rounded-full border-2 border-white shadow-xs cursor-nwse-resize z-50"
                               onPointerDown={(e) => {
                                 e.stopPropagation();
                                 const container = e.currentTarget.parentElement?.parentElement;
@@ -1264,10 +1503,10 @@ export default function PdfEditorClient() {
         </div>
       </div>
 
-      {/* SIGNATURE PAD MODAL FOR SIGNATURE TOOL */}
+      {/* SIGNATURE PAD MODAL */}
       <SignaturePadModal
         isOpen={sigModalOpen}
-        title="Create Signature to Place"
+        title="Create Signature to Stamp"
         onClose={() => setSigModalOpen(false)}
         onSave={(dataUrl) => {
           setPreparedSigDataUrl(dataUrl);
