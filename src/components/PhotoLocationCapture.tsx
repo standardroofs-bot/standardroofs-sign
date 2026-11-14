@@ -11,6 +11,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 
 export interface PhotoLocationData {
@@ -51,6 +52,7 @@ export default function PhotoLocationCapture({
   onChange,
 }: PhotoLocationCaptureProps) {
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [locLoading, setLocLoading] = useState(false);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [resolvedAddress, setResolvedAddress] = useState<string>(locationAddress || "");
@@ -216,21 +218,62 @@ export default function PhotoLocationCapture({
       });
       streamRef.current = stream;
       setCameraActive(true);
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          void videoRef.current.play();
-        }
-      }, 80);
     } catch {
       setError("Camera permission denied. Use 'Phone Camera / Upload' instead.");
     }
   }
 
+  // Ensure video element receives stream and is fully ready to draw frames
+  useEffect(() => {
+    if (!cameraActive || !streamRef.current) {
+      setCameraReady(false);
+      return;
+    }
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.srcObject = streamRef.current;
+    video.setAttribute("autoplay", "");
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("muted", "");
+
+    const markReadyIfValid = () => {
+      if (video.videoWidth > 0 && video.readyState >= 2) {
+        setCameraReady(true);
+      }
+    };
+
+    video.addEventListener("loadedmetadata", markReadyIfValid);
+    video.addEventListener("loadeddata", markReadyIfValid);
+    video.addEventListener("canplay", markReadyIfValid);
+    video.addEventListener("playing", markReadyIfValid);
+
+    video.play().catch((err) => {
+      console.warn("Video play exception:", err);
+    });
+
+    const interval = setInterval(() => {
+      if (video.videoWidth > 0 && video.readyState >= 2) {
+        setCameraReady(true);
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => {
+      video.removeEventListener("loadedmetadata", markReadyIfValid);
+      video.removeEventListener("loadeddata", markReadyIfValid);
+      video.removeEventListener("canplay", markReadyIfValid);
+      video.removeEventListener("playing", markReadyIfValid);
+      clearInterval(interval);
+    };
+  }, [cameraActive]);
+
   function stopCamera() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setCameraActive(false);
+    setCameraReady(false);
   }
 
   // Burn clean verification banner onto bottom of captured selfie
@@ -304,6 +347,20 @@ export default function PhotoLocationCapture({
   async function takeSnapshot() {
     const video = videoRef.current;
     if (!video) return;
+
+    // Guard against capturing black frame if camera frames aren't decoded yet
+    if (video.videoWidth === 0 || video.readyState < 2) {
+      await new Promise<void>((resolve) => {
+        let attempts = 0;
+        const check = setInterval(() => {
+          attempts++;
+          if ((video.videoWidth > 0 && video.readyState >= 2) || attempts >= 25) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 80);
+      });
+    }
 
     let currentLat = latitude;
     let currentLng = longitude;
@@ -614,26 +671,44 @@ export default function PhotoLocationCapture({
 
           {cameraActive ? (
             <div className="space-y-3">
-              <div className="relative rounded-xl overflow-hidden bg-black max-h-[360px] flex items-center justify-center">
+              <div className="relative rounded-xl overflow-hidden bg-black min-h-[260px] max-h-[360px] flex items-center justify-center">
                 <video
                   ref={videoRef}
                   playsInline
+                  autoPlay
                   muted
                   className="w-full h-full max-h-[360px] object-cover"
                 />
-                <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg text-white text-[11px] flex items-center gap-1.5 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                  Live Front Camera
+                {!cameraReady && (
+                  <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2 text-white p-4 text-center z-10">
+                    <Loader2 className="w-7 h-7 text-red-500 animate-spin" />
+                    <span className="text-xs font-semibold">Starting camera sensor...</span>
+                    <span className="text-[10px] text-slate-300">Please wait a moment for the preview to appear</span>
+                  </div>
+                )}
+                <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-lg text-white text-[11px] flex items-center gap-1.5 font-medium z-20">
+                  <span className={`w-2 h-2 rounded-full ${cameraReady ? "bg-red-500 animate-ping" : "bg-amber-400"}`} />
+                  {cameraReady ? "Live Front Camera" : "Connecting..."}
                 </div>
               </div>
               <div className="flex gap-2.5">
                 <button
                   type="button"
                   onClick={takeSnapshot}
-                  className="flex-1 py-2.5 rounded-xl bg-red-700 hover:bg-red-800 text-white text-xs font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5"
+                  disabled={!cameraReady}
+                  className="flex-1 py-2.5 rounded-xl bg-red-700 hover:bg-red-800 disabled:bg-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  <Camera className="w-4 h-4" />
-                  Capture Selfie
+                  {cameraReady ? (
+                    <>
+                      <Camera className="w-4 h-4" />
+                      Capture Selfie
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Warming Camera...
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"
