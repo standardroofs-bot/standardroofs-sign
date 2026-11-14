@@ -185,11 +185,26 @@ export async function POST(req: Request) {
         const boxX = edit.normX * pdfW;
         const boxY = pdfH - (edit.normY * pdfH) - boxH;
 
+        const fontChoice = selectFont(edit.fontFamily, edit.isBold, edit.isItalic);
+        const font = await getFont(fontChoice);
+        const fontSize = Math.max(7, Math.min(72, edit.fontSize || Math.round(boxH * 0.75)));
+        const textColor = parseHexColor(edit.color, { r: 0.05, g: 0.08, b: 0.15 });
+
+        let clearWidth = boxW;
+        if (edit.newText && edit.newText.trim().length > 0) {
+          try {
+            const measuredWidth = font.widthOfTextAtSize(edit.newText, fontSize);
+            if (measuredWidth > clearWidth) {
+              clearWidth = measuredWidth;
+            }
+          } catch (_) {}
+        }
+
         // Whiteout the original text with a small padding so it is completely removed
         page.drawRectangle({
           x: Math.max(0, boxX - 1.5),
           y: Math.max(0, boxY - 1.5),
-          width: boxW + 3,
+          width: clearWidth + 4,
           height: boxH + 3,
           color: rgb(1, 1, 1),
           opacity: 1,
@@ -197,11 +212,6 @@ export async function POST(req: Request) {
 
         // If not deleted and user entered replacement text, draw the new text
         if (!edit.isDeleted && edit.newText && edit.newText.trim().length > 0) {
-          const fontChoice = selectFont(edit.fontFamily, edit.isBold, edit.isItalic);
-          const font = await getFont(fontChoice);
-          const fontSize = Math.max(7, Math.min(72, edit.fontSize || Math.round(boxH * 0.75)));
-          const textColor = parseHexColor(edit.color, { r: 0.05, g: 0.08, b: 0.15 });
-
           // In PDF, y is baseline
           const textY = boxY + Math.max(1, boxH * 0.22);
 

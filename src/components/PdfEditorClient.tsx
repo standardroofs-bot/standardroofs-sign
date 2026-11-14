@@ -21,6 +21,7 @@ import {
   AlertCircle,
   Loader2,
   Undo2,
+  Redo2,
   X,
   FileText,
   FileEdit,
@@ -219,6 +220,16 @@ export default function PdfEditorClient() {
   const [deletedPages, setDeletedPages] = useState<number[]>([]);
   const [rotations, setRotations] = useState<Record<number, number>>({});
   const [zoomScale, setZoomScale] = useState(1.0);
+
+  // Undo / Redo History Stack (Ctrl+Z)
+  interface HistorySnapshot {
+    textLines: EditableTextLine[];
+    customElements: CustomElement[];
+    deletedPages: number[];
+    rotations: Record<number, number>;
+  }
+  const [undoStack, setUndoStack] = useState<HistorySnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<HistorySnapshot[]>([]);
 
   // Status & Notifications
   const [exporting, setExporting] = useState(false);
@@ -431,22 +442,105 @@ export default function PdfEditorClient() {
     }
   }
 
-  // Keyboard shortcuts
+  // Save snapshot before any state modification for Undo (Ctrl+Z)
+  const saveHistorySnapshot = useCallback(() => {
+    setUndoStack((prev) => [
+      ...prev.slice(-30),
+      {
+        textLines: textLines.map((l) => ({ ...l })),
+        customElements: customElements.map((el) => ({ ...el })),
+        deletedPages: [...deletedPages],
+        rotations: { ...rotations },
+      },
+    ]);
+    setRedoStack([]);
+  }, [textLines, customElements, deletedPages, rotations]);
+
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    const newUndoStack = undoStack.slice(0, -1);
+
+    setRedoStack((prev) => [
+      ...prev,
+      {
+        textLines: textLines.map((l) => ({ ...l })),
+        customElements: customElements.map((el) => ({ ...el })),
+        deletedPages: [...deletedPages],
+        rotations: { ...rotations },
+      },
+    ]);
+
+    setUndoStack(newUndoStack);
+    setTextLines(previous.textLines);
+    setCustomElements(previous.customElements);
+    setDeletedPages(previous.deletedPages);
+    setRotations(previous.rotations);
+    setActiveEditingLineId(null);
+    setSelectedCustomElemId(null);
+  }, [undoStack, textLines, customElements, deletedPages, rotations]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    const newRedoStack = redoStack.slice(0, -1);
+
+    setUndoStack((prev) => [
+      ...prev,
+      {
+        textLines: textLines.map((l) => ({ ...l })),
+        customElements: customElements.map((el) => ({ ...el })),
+        deletedPages: [...deletedPages],
+        rotations: { ...rotations },
+      },
+    ]);
+
+    setRedoStack(newRedoStack);
+    setTextLines(next.textLines);
+    setCustomElements(next.customElements);
+    setDeletedPages(next.deletedPages);
+    setRotations(next.rotations);
+    setActiveEditingLineId(null);
+    setSelectedCustomElemId(null);
+  }, [redoStack, textLines, customElements, deletedPages, rotations]);
+
+  // Keyboard shortcuts (including Ctrl+Z and Ctrl+Y)
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const isInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        if (!isInput) {
+          e.preventDefault();
+          if (e.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+          return;
+        }
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        if (!isInput) {
+          e.preventDefault();
+          handleRedo();
+          return;
+        }
+      }
+
+      if (isInput) return;
 
       if (e.key === "Delete" || e.key === "Backspace") {
         if (selectedCustomElemId) {
           e.preventDefault();
+          saveHistorySnapshot();
           setCustomElements((prev) => prev.filter((el) => el.id !== selectedCustomElemId));
           setSelectedCustomElemId(null);
         } else if (activeEditingLineId) {
           e.preventDefault();
-          setTextLines((prev) =>
-            prev.map((l) => (l.id === activeEditingLineId ? { ...l, isDeleted: true, isEdited: true } : l))
-          );
+          deleteTextLine(activeEditingLineId);
         }
       } else if (e.key === "Escape") {
         setActiveEditingLineId(null);
@@ -456,7 +550,7 @@ export default function PdfEditorClient() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedCustomElemId, activeEditingLineId]);
+  }, [selectedCustomElemId, activeEditingLineId, handleUndo, handleRedo, saveHistorySnapshot]);
 
   // Pointer move & up listeners for custom elements
   useEffect(() => {
@@ -519,6 +613,7 @@ export default function PdfEditorClient() {
   }
 
   function deleteTextLine(lineId: string) {
+    saveHistorySnapshot();
     setTextLines((prev) =>
       prev.map((l) => (l.id === lineId ? { ...l, isDeleted: true, isEdited: true } : l))
     );
@@ -528,6 +623,7 @@ export default function PdfEditorClient() {
   }
 
   function restoreTextLine(lineId: string) {
+    saveHistorySnapshot();
     setTextLines((prev) =>
       prev.map((l) =>
         l.id === lineId
@@ -556,6 +652,7 @@ export default function PdfEditorClient() {
     const clickX = (e.clientX - rect.left) / rect.width;
     const clickY = (e.clientY - rect.top) / rect.height;
     const newId = `elem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    saveHistorySnapshot();
 
     if (activeTool === "add-text") {
       const newElem: CustomElement = {
@@ -640,12 +737,14 @@ export default function PdfEditorClient() {
   }
 
   function toggleDeletePage(pageNum: number) {
+    saveHistorySnapshot();
     setDeletedPages((prev) =>
       prev.includes(pageNum) ? prev.filter((p) => p !== pageNum) : [...prev, pageNum]
     );
   }
 
   function rotatePage(pageNum: number) {
+    saveHistorySnapshot();
     setRotations((prev) => {
       const cur = prev[pageNum] || 0;
       return { ...prev, [pageNum]: (cur + 90) % 360 };
@@ -949,8 +1048,40 @@ export default function PdfEditorClient() {
           </button>
         </div>
 
-        {/* Right: Zoom & Export Action buttons */}
+        {/* Right: Undo/Redo, Zoom & Export Action buttons */}
         <div className="flex items-center gap-2">
+          {/* Undo / Redo */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium">
+            <button
+              type="button"
+              onClick={handleUndo}
+              disabled={undoStack.length === 0}
+              className={`p-1.5 rounded-lg flex items-center gap-1 transition ${
+                undoStack.length > 0
+                  ? "text-slate-800 hover:bg-white hover:shadow-xs cursor-pointer"
+                  : "text-slate-300 cursor-not-allowed"
+              }`}
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline font-medium">Undo</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleRedo}
+              disabled={redoStack.length === 0}
+              className={`p-1.5 rounded-lg flex items-center gap-1 transition ${
+                redoStack.length > 0
+                  ? "text-slate-800 hover:bg-white hover:shadow-xs cursor-pointer"
+                  : "text-slate-300 cursor-not-allowed"
+              }`}
+              title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline font-medium">Redo</span>
+            </button>
+          </div>
+
           {/* Zoom */}
           <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-medium text-slate-600">
             <button
@@ -1377,10 +1508,6 @@ export default function PdfEditorClient() {
 
                       if (isEditing) {
                         // Currently Active Editable Line: Exact baseline alignment, matching color, font-weight, auto-expanding width
-                        const charEstimateWidth = (line.currentText.length * line.fontSize * 0.62) / 8.4;
-                        const dynamicWidth = Math.max(line.normW * 100, charEstimateWidth + 5);
-                        const maxWidth = (1 - line.normX) * 100;
-
                         return (
                           <div
                             key={line.id}
@@ -1388,7 +1515,9 @@ export default function PdfEditorClient() {
                             style={{
                               left: `${line.normX * 100}%`,
                               top: `${line.normY * 100}%`,
-                              width: `${Math.min(dynamicWidth, maxWidth)}%`,
+                              minWidth: `${line.normW * 100}%`,
+                              width: "max-content",
+                              maxWidth: `${(1 - line.normX) * 100}%`,
                               height: `${line.normH * 100}%`,
                               padding: "0 2px",
                             }}
@@ -1402,7 +1531,7 @@ export default function PdfEditorClient() {
                                 updateTextLine(line.id, { currentText: e.target.value });
                               }}
                               onKeyDown={(e) => {
-                                if (e.key === "Enter") {
+                                if (e.key === "Enter" || e.key === "Escape") {
                                   setActiveEditingLineId(null);
                                 }
                               }}
@@ -1419,8 +1548,10 @@ export default function PdfEditorClient() {
                                 fontStyle: line.isItalic ? "italic" : "normal",
                                 height: "100%",
                                 lineHeight: "1",
+                                whiteSpace: "nowrap",
+                                width: `${Math.max(line.currentText.length + 2, 4)}ch`,
                               }}
-                              className="w-full bg-white border-none outline-hidden p-0 m-0"
+                              className="bg-white border-none outline-hidden p-0 m-0 whitespace-nowrap min-w-[24px]"
                             />
                             <button
                               type="button"
@@ -1435,7 +1566,7 @@ export default function PdfEditorClient() {
                       }
 
                       if (line.isEdited) {
-                        // Edited Line (Saved): Solid white cover with newly typed text displayed with exact typography
+                        // Edited Line (Saved): Solid white cover with newly typed text displayed with exact typography - NO TRUNCATE OR ELLIPSIS
                         return (
                           <div
                             key={line.id}
@@ -1443,11 +1574,14 @@ export default function PdfEditorClient() {
                             style={{
                               left: `${line.normX * 100}%`,
                               top: `${line.normY * 100}%`,
-                              width: `${line.normW * 100}%`,
+                              minWidth: `${line.normW * 100}%`,
+                              width: "max-content",
+                              maxWidth: `${(1 - line.normX) * 100}%`,
                               height: `${line.normH * 100}%`,
                             }}
                             onClick={(e) => {
                               e.stopPropagation();
+                              saveHistorySnapshot();
                               setActiveEditingLineId(line.id);
                             }}
                             title="Click to re-edit this modified line"
@@ -1465,8 +1599,9 @@ export default function PdfEditorClient() {
                                 fontWeight: line.isBold ? 700 : 400,
                                 fontStyle: line.isItalic ? "italic" : "normal",
                                 lineHeight: "1",
+                                whiteSpace: "nowrap",
                               }}
-                              className="truncate block w-full"
+                              className="block whitespace-nowrap"
                             >
                               {line.currentText}
                             </span>
@@ -1487,6 +1622,7 @@ export default function PdfEditorClient() {
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
+                            saveHistorySnapshot();
                             setActiveEditingLineId(line.id);
                           }}
                           title={`Click to edit: "${line.originalText}"`}
