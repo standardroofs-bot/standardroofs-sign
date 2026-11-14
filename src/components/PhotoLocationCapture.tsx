@@ -109,43 +109,83 @@ export default function PhotoLocationCapture({
     }
   }, [latitude, longitude, resolvedAddress, reverseGeocodeCoords]);
 
-  // Fetch HTML5 Geolocation with high accuracy (forces live satellite fix, bypasses stale cache)
+  // Fetch real-time pinpoint GPS by continuously listening to satellite updates until accuracy converges
   const requestGps = useCallback((): Promise<{ lat: number; lng: number; acc: number } | null> => {
     if (typeof window === "undefined" || !navigator.geolocation) {
       return Promise.resolve(null);
     }
     setLocLoading(true);
+
     return new Promise((resolve) => {
-      // 1. Force real-time hardware satellite fix with maximumAge: 0
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLocLoading(false);
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          const acc = Math.round(pos.coords.accuracy || 10);
-          setAccuracy(acc);
-          resolve({ lat, lng, acc });
-        },
-        () => {
-          // 2. Fallback to relaxed settings if satellite lock takes longer or indoors
-          navigator.geolocation.getCurrentPosition(
-            (pos2) => {
-              setLocLoading(false);
-              const lat = pos2.coords.latitude;
-              const lng = pos2.coords.longitude;
-              const acc = Math.round(pos2.coords.accuracy || 25);
+      let bestFix: { lat: number; lng: number; acc: number } | null = null;
+      let watchId: number | null = null;
+
+      const finish = () => {
+        if (watchId !== null) {
+          try {
+            navigator.geolocation.clearWatch(watchId);
+          } catch {}
+          watchId = null;
+        }
+        setLocLoading(false);
+        resolve(bestFix);
+      };
+
+      // 6.5s convergence window: allows satellite chip to lock onto 4+ satellites
+      const convergenceTimer = setTimeout(() => {
+        finish();
+      }, 6500);
+
+      try {
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const acc = Math.round(pos.coords.accuracy || 20);
+
+            if (!bestFix || acc < bestFix.acc) {
+              bestFix = { lat, lng, acc };
               setAccuracy(acc);
-              resolve({ lat, lng, acc });
-            },
-            () => {
-              setLocLoading(false);
-              resolve(null);
-            },
-            { enableHighAccuracy: false, timeout: 6000, maximumAge: 5000 }
-          );
-        },
-        { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-      );
+
+              // If doorstep satellite accuracy reached (<= 15 meters), lock immediately
+              if (acc <= 15) {
+                clearTimeout(convergenceTimer);
+                finish();
+              }
+            }
+          },
+          () => {
+            // If watchPosition encounters error, fallback to one-shot
+            if (!bestFix) {
+              navigator.geolocation.getCurrentPosition(
+                (p) => {
+                  bestFix = {
+                    lat: p.coords.latitude,
+                    lng: p.coords.longitude,
+                    acc: Math.round(p.coords.accuracy || 25),
+                  };
+                  setAccuracy(bestFix.acc);
+                  clearTimeout(convergenceTimer);
+                  finish();
+                },
+                () => {
+                  clearTimeout(convergenceTimer);
+                  finish();
+                },
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+              );
+            }
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000,
+          }
+        );
+      } catch {
+        clearTimeout(convergenceTimer);
+        finish();
+      }
     });
   }, []);
 
@@ -236,7 +276,7 @@ export default function PhotoLocationCapture({
     let gpsStr = "GPS: Location Pending / Disabled";
     if (coords.lat != null && coords.lng != null) {
       gpsStr = `GPS: ${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}${
-        coords.acc ? ` (±${coords.acc}m)` : ""
+        coords.acc ? ` (±${coords.acc}m${coords.acc <= 15 ? " Sat" : ""})` : ""
       }`;
     }
     ctx.font = "bold 11px monospace";
@@ -758,10 +798,7 @@ export default function PhotoLocationCapture({
               onClick={() => {
                 void requestGps().then(async (coords) => {
                   if (coords) {
-                    let addr = resolvedAddress;
-                    if (!addr) {
-                      addr = await reverseGeocodeCoords(coords.lat, coords.lng);
-                    }
+                    const addr = await reverseGeocodeCoords(coords.lat, coords.lng);
                     onChange({
                       photoDataUrl,
                       latitude: coords.lat,
@@ -778,10 +815,10 @@ export default function PhotoLocationCapture({
               <MapPin className="w-3.5 h-3.5" />
               <span>
                 {locLoading
-                  ? "Acquiring GPS..."
+                  ? "🛰️ Locking Real-time Satellite GPS..."
                   : latitude != null
-                  ? "Refresh GPS Coordinates"
-                  : "Detect GPS Location"}
+                  ? "🛰️ Re-Pinpoint Satellite GPS"
+                  : "🛰️ Lock Real-time Satellite GPS"}
               </span>
             </button>
 
@@ -790,11 +827,13 @@ export default function PhotoLocationCapture({
                 <div className="flex items-center justify-between font-bold">
                   <span className="flex items-center gap-1 text-emerald-800">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    Coordinates Locked
+                    {accuracy && accuracy <= 20 ? "Satellite GPS Locked" : "Live GPS Acquired"}
                   </span>
                   {accuracy && (
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
-                      ±{accuracy}m accuracy
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                      accuracy <= 15 ? "bg-emerald-200 text-emerald-900 border border-emerald-300" : "bg-amber-100 text-amber-900 border border-amber-200"
+                    }`}>
+                      {accuracy <= 15 ? "🛰️ Pinpoint" : "📡 High"} ±{accuracy}m
                     </span>
                   )}
                 </div>

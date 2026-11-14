@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -60,6 +60,47 @@ export default function DashboardClient({
   const [filterCat, setFilterCat] = useState<string>("ALL");
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Auto-poll in background every 4s to keep requests and status counters fresh without manual reload
+  useEffect(() => {
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      try {
+        const res = await fetch("/api/requests", { cache: "no-store" });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.requests && isMounted) {
+          setRequests(
+            json.requests.map((r: any) => ({
+              id: r.id,
+              title: r.title,
+              projectName: r.projectName,
+              category: r.category,
+              status: r.status,
+              hasSignedPdf: Boolean(r.signedPdfPath),
+              createdAt: new Date(r.createdAt).toISOString(),
+              completedAt: r.completedAt ? new Date(r.completedAt).toISOString() : null,
+              signers: (r.signers || []).map((s: any) => ({
+                id: s.id,
+                role: s.role,
+                name: s.name,
+                email: s.email,
+                phone: s.phone,
+                status: s.status,
+                token: s.token,
+              })),
+            }))
+          );
+        }
+      } catch {}
+    }, 4000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   async function handleDeleteRequest(id: string, title: string) {
     if (!confirm(`Delete "${title}" permanently?`)) return;

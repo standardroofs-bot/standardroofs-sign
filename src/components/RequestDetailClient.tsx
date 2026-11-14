@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Smartphone,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { CATEGORY_LABELS, type DocumentCategory } from "@/lib/types";
 
@@ -56,12 +57,82 @@ interface RequestDetailProps {
 }
 
 export default function RequestDetailClient({
-  request,
+  request: initialRequest,
   publicBaseUrl = "",
 }: RequestDetailProps & { publicBaseUrl?: string }) {
   const router = useRouter();
+  const [request, setRequest] = useState(initialRequest);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [voiding, setVoiding] = useState(false);
+  const [isLiveSyncing, setIsLiveSyncing] = useState(false);
+
+  // Real-time live status synchronization: polls every 2.5s while pending/partial
+  useEffect(() => {
+    if (request.status === "COMPLETED" || request.status === "VOIDED") {
+      return;
+    }
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+
+      try {
+        setIsLiveSyncing(true);
+        const res = await fetch(`/api/requests/${request.id}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.request && isMounted) {
+          const fresh = json.request;
+          setRequest((prev) => {
+            const statusChanged = prev.status !== fresh.status;
+            const signersChanged =
+              JSON.stringify(prev.signers.map((s) => s.status)) !==
+              JSON.stringify(fresh.signers.map((s: any) => s.status));
+
+            if (statusChanged || signersChanged) {
+              try { router.refresh(); } catch {}
+            }
+
+            return {
+              ...prev,
+              status: fresh.status,
+              hasSignedPdf: Boolean(fresh.signedPdfPath),
+              signedHash: fresh.signedHash,
+              completedAt: fresh.completedAt ? new Date(fresh.completedAt).toISOString() : null,
+              signers: fresh.signers.map((s: any) => ({
+                id: s.id,
+                role: s.role,
+                name: s.name,
+                email: s.email,
+                phone: s.phone,
+                status: s.status,
+                token: s.token,
+                viewedAt: s.viewedAt ? new Date(s.viewedAt).toISOString() : null,
+                signedAt: s.signedAt ? new Date(s.signedAt).toISOString() : null,
+                ipAddress: s.ipAddress,
+              })),
+              auditEvents: (fresh.auditEvents || []).map((e: any) => ({
+                id: e.id,
+                action: e.action,
+                details: e.details,
+                ipAddress: e.ipAddress,
+                createdAt: new Date(e.createdAt).toISOString(),
+              })),
+            };
+          });
+        }
+      } catch {
+        // Silently ignore poll hiccups
+      } finally {
+        if (isMounted) setIsLiveSyncing(false);
+      }
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [request.id, request.status, router]);
 
   function getSignUrl(token: string) {
     // If a public domain or tunnel is configured, ALWAYS prefer it for WhatsApp/SMS sharing
@@ -161,9 +232,23 @@ export default function RequestDetailClient({
               <h1 className="text-xl font-bold text-slate-900">
                 {request.title}
               </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+              <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                request.status === "COMPLETED"
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                  : request.status === "PARTIAL"
+                  ? "bg-blue-50 text-blue-800 border-blue-200"
+                  : request.status === "VOIDED"
+                  ? "bg-slate-100 text-slate-600 border-slate-200"
+                  : "bg-amber-50 text-amber-800 border-amber-200"
+              }`}>
                 {request.status}
               </span>
+              {(request.status === "PENDING" || request.status === "PARTIAL") && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  Live Real-time Sync
+                </span>
+              )}
             </div>
             <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-3">
               <span>

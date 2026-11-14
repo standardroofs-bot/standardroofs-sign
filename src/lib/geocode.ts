@@ -9,7 +9,28 @@ export async function reverseGeocode(
 ): Promise<GeocodeResult> {
   const mapsUrl = `https://maps.google.com/?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
 
-  // 1. Primary Lookup: OpenStreetMap Nominatim with timeout
+  // 1. Google Maps Geocoding API (Doorstep Indian Precision if GOOGLE_MAPS_API_KEY is configured)
+  const gApiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (gApiKey) {
+    try {
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${gApiKey}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results[0]?.formatted_address) {
+          return {
+            address: data.results[0].formatted_address,
+            mapsUrl,
+          };
+        }
+      }
+    } catch {
+      // Ignore Google API failure, fall through to Nominatim
+    }
+  }
+
+  // 2. OpenStreetMap Nominatim with Building-Level Zoom (18)
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -106,7 +127,7 @@ export async function reverseGeocode(
     console.warn("Nominatim reverse geocode error or timeout:", err);
   }
 
-  // 2. Secondary Lookup: BigDataCloud Reverse Geocoding API
+  // 3. Secondary Lookup: BigDataCloud Reverse Geocoding API
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -140,27 +161,6 @@ export async function reverseGeocode(
     }
   } catch (err) {
     console.warn("BigDataCloud reverse geocode error:", err);
-  }
-
-  // 3. Optional Google Maps Geocoding API (if GOOGLE_MAPS_API_KEY is configured)
-  const gApiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (gApiKey) {
-    try {
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${gApiKey}`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data.results && data.results[0]?.formatted_address) {
-          return {
-            address: data.results[0].formatted_address,
-            mapsUrl,
-          };
-        }
-      }
-    } catch {
-      // Ignore Google API failure
-    }
   }
 
   // Fallback: GPS Coordinates formatted representation
