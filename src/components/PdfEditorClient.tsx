@@ -47,7 +47,8 @@ export interface EditableTextLine {
   currentText: string;
   isEdited: boolean;
   isDeleted: boolean;
-  fontSize: number;
+  fontSize: number; // raw PDF points
+  scale: number; // canvas viewport scale factor (e.g. 1.411)
   fontFamily: "Helvetica" | "Times" | "Courier";
   color: string;
   isBold: boolean;
@@ -309,6 +310,13 @@ export default function PdfEditorClient() {
       const pixelH = (l.h * 1.25) * scale;
       const sampled = sampleLineStyle(ctx, pixelX, pixelY, pixelW, pixelH, l.fontName);
 
+      // Intelligent bold detection for headers, section titles, and key labels
+      const trimmed = l.text.trim();
+      const isAllUpper = trimmed.length >= 3 && trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed);
+      const isNumberedHeader = /^\d+\.\s+[A-Z]/.test(trimmed);
+      const isKeyLabel = trimmed.endsWith(":") || /^[A-Z][a-zA-Z\s]+:/.test(trimmed);
+      const detectedBold = sampled.isBold || isNumberedHeader || isAllUpper || isKeyLabel;
+
       return {
         id: `p${pageNum}_line_${idx}`,
         pageNumber: pageNum,
@@ -317,9 +325,10 @@ export default function PdfEditorClient() {
         isEdited: false,
         isDeleted: false,
         fontSize: Math.max(8, Math.min(48, l.fontSize)),
+        scale: Math.round(scale * 1000) / 1000,
         fontFamily: "Helvetica",
         color: sampled.color,
-        isBold: sampled.isBold,
+        isBold: detectedBold,
         isItalic: false,
         normX: Math.max(0, (l.x - 2) / pageW),
         normY: Math.max(0, (pageH - (l.y + l.h * 1.05)) / pageH),
@@ -1399,7 +1408,7 @@ export default function PdfEditorClient() {
                               }}
                               style={{
                                 color: line.color,
-                                fontSize: `${line.fontSize * zoomScale}px`,
+                                fontSize: `${Math.round(line.fontSize * (line.scale || 1.411) * zoomScale * 10) / 10}px`,
                                 fontFamily:
                                   line.fontFamily === "Times"
                                     ? "'Times New Roman', serif"
@@ -1446,7 +1455,7 @@ export default function PdfEditorClient() {
                             <span
                               style={{
                                 color: line.color,
-                                fontSize: `${line.fontSize * zoomScale}px`,
+                                fontSize: `${Math.round(line.fontSize * (line.scale || 1.411) * zoomScale * 10) / 10}px`,
                                 fontFamily:
                                   line.fontFamily === "Times"
                                     ? "'Times New Roman', serif"
