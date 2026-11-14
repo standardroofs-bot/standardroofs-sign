@@ -29,6 +29,7 @@ import {
   Plus,
   Sparkles,
   Edit3,
+  Palette,
 } from "lucide-react";
 
 export type EditorTool =
@@ -94,15 +95,95 @@ const STAMP_PRESETS = [
 
 const COLOR_SWATCHES = [
   "#000000",
-  "#334155",
-  "#dc2626",
-  "#2563eb",
-  "#16a34a",
-  "#7c3aed",
-  "#d97706",
+  "#881337", // Maroon / Deep Red
+  "#dc2626", // Red
+  "#1e3a8a", // Navy Blue
+  "#2563eb", // Blue
+  "#15803d", // Green
+  "#475569", // Slate
 ];
 
-const FONT_SIZES = [10, 12, 14, 16, 18, 22, 28, 36];
+// Sample rendered canvas to detect exact pixel color and bold weight
+function sampleLineStyle(
+  ctx: CanvasRenderingContext2D,
+  pixelX: number,
+  pixelY: number,
+  pixelW: number,
+  pixelH: number,
+  fontName?: string
+): { color: string; isBold: boolean } {
+  const fnLower = (fontName || "").toLowerCase();
+  let isBold =
+    fnLower.includes("bold") ||
+    fnLower.includes("black") ||
+    fnLower.includes("heavy") ||
+    fnLower.endsWith("_f3") ||
+    fnLower.includes("f3");
+
+  let detectedColor = "#0f172a";
+
+  try {
+    const sampleW = Math.max(8, Math.min(Math.floor(pixelW), 250));
+    const sampleH = Math.max(6, Math.min(Math.floor(pixelH), 50));
+    const startX = Math.max(0, Math.floor(pixelX));
+    const startY = Math.max(0, Math.floor(pixelY));
+
+    const imgData = ctx.getImageData(startX, startY, sampleW, sampleH);
+    const data = imgData.data;
+
+    let darkCount = 0;
+    let coloredCount = 0;
+    let sumR = 0, sumG = 0, sumB = 0;
+    let colR = 0, colG = 0, colB = 0;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+
+      // Skip transparent or near-white background
+      if (a < 50 || (r > 235 && g > 235 && b > 235)) continue;
+
+      darkCount++;
+      sumR += r;
+      sumG += g;
+      sumB += b;
+
+      // Chromatic color detection (e.g. Maroon red, Dark blue)
+      const maxVal = Math.max(r, g, b);
+      const minVal = Math.min(r, g, b);
+      if (maxVal - minVal > 22) {
+        coloredCount++;
+        colR += r;
+        colG += g;
+        colB += b;
+      }
+    }
+
+    if (coloredCount > 8) {
+      const avgR = Math.round(colR / coloredCount);
+      const avgG = Math.round(colG / coloredCount);
+      const avgB = Math.round(colB / coloredCount);
+      detectedColor = `#${((1 << 24) + (avgR << 16) + (avgG << 8) + avgB).toString(16).slice(1)}`;
+    } else if (darkCount > 0) {
+      const avgR = Math.round(sumR / darkCount);
+      const avgG = Math.round(sumG / darkCount);
+      const avgB = Math.round(sumB / darkCount);
+      detectedColor = `#${((1 << 24) + (avgR << 16) + (avgG << 8) + avgB).toString(16).slice(1)}`;
+    }
+
+    // Density check for bold
+    const density = darkCount / (sampleW * sampleH);
+    if (density > 0.16) {
+      isBold = true;
+    }
+  } catch (e) {
+    // fallback
+  }
+
+  return { color: detectedColor, isBold };
+}
 
 export default function PdfEditorClient() {
   const router = useRouter();
@@ -158,18 +239,20 @@ export default function PdfEditorClient() {
     hasMoved: boolean;
   } | null>(null);
 
-  // Group extracted PDF text items into cohesive lines
+  // Group extracted PDF text items and sample their exact colors and styles
   const groupTextIntoLines = (
     items: any[],
     pageW: number,
     pageH: number,
-    pageNum: number
+    pageNum: number,
+    ctx: CanvasRenderingContext2D,
+    scale: number
   ): EditableTextLine[] => {
     const valid = items.filter(
       (it) => typeof it.str === "string" && it.str.trim().length > 0 && it.transform
     );
 
-    // Sort top-to-bottom (Y descending in PDF), then left-to-right (X ascending)
+    // Sort top-to-bottom, then left-to-right
     const sorted = [...valid].sort((a, b) => {
       const yDiff = b.transform[5] - a.transform[5];
       if (Math.abs(yDiff) > 3.5) return yDiff;
@@ -183,12 +266,13 @@ export default function PdfEditorClient() {
       w: number;
       h: number;
       fontSize: number;
+      fontName: string;
     }[] = [];
 
     for (const it of sorted) {
       const itX = it.transform[4];
       const itY = it.transform[5];
-      const itFs = Math.round(Math.hypot(it.transform[0], it.transform[1])) || 12;
+      const itFs = Math.round(Math.hypot(it.transform[0], it.transform[1]) * 10) / 10 || 12;
       const itH = it.height || itFs;
       const itW = it.width || it.str.length * itFs * 0.55;
 
@@ -212,30 +296,40 @@ export default function PdfEditorClient() {
           w: itW,
           h: itH,
           fontSize: itFs,
+          fontName: it.fontName || "",
         });
       }
     }
 
-    return rawLines.map((l, idx) => ({
-      id: `p${pageNum}_line_${idx}`,
-      pageNumber: pageNum,
-      originalText: l.text,
-      currentText: l.text,
-      isEdited: false,
-      isDeleted: false,
-      fontSize: Math.max(9, Math.min(48, l.fontSize)),
-      fontFamily: "Helvetica",
-      color: "#0f172a",
-      isBold: false,
-      isItalic: false,
-      normX: Math.max(0, (l.x - 2) / pageW),
-      normY: Math.max(0, (pageH - (l.y + l.h * 1.05)) / pageH),
-      normW: Math.min(1, (l.w + 6) / pageW),
-      normH: Math.min(1, (l.h * 1.35) / pageH),
-    }));
+    return rawLines.map((l, idx) => {
+      // Sample style from canvas pixels
+      const pixelX = (l.x - 2) * scale;
+      const pixelY = (pageH - (l.y + l.h * 1.05)) * scale;
+      const pixelW = (l.w + 6) * scale;
+      const pixelH = (l.h * 1.25) * scale;
+      const sampled = sampleLineStyle(ctx, pixelX, pixelY, pixelW, pixelH, l.fontName);
+
+      return {
+        id: `p${pageNum}_line_${idx}`,
+        pageNumber: pageNum,
+        originalText: l.text,
+        currentText: l.text,
+        isEdited: false,
+        isDeleted: false,
+        fontSize: Math.max(8, Math.min(48, l.fontSize)),
+        fontFamily: "Helvetica",
+        color: sampled.color,
+        isBold: sampled.isBold,
+        isItalic: false,
+        normX: Math.max(0, (l.x - 2) / pageW),
+        normY: Math.max(0, (pageH - (l.y + l.h * 1.05)) / pageH),
+        normW: Math.min(1, (l.w + 6) / pageW),
+        normH: Math.min(1, (l.h * 1.28) / pageH),
+      };
+    });
   };
 
-  // Load and Render PDF with pdfjs-dist & extract live text content
+  // Load and Render PDF with pdfjs-dist & extract text + styles
   const renderPdfFile = useCallback(async (selectedFile: File) => {
     try {
       setLoadingPdf(true);
@@ -268,7 +362,7 @@ export default function PdfEditorClient() {
 
         // 1. Render visual canvas
         const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
         if (!ctx) continue;
         canvas.width = Math.floor(viewport.width);
         canvas.height = Math.floor(viewport.height);
@@ -282,14 +376,16 @@ export default function PdfEditorClient() {
           dataUrl: canvas.toDataURL("image/png"),
         });
 
-        // 2. Extract text items & group into editable lines
+        // 2. Extract text items & sample exact font styles & colors
         try {
           const textContent = await page.getTextContent();
           const pageLines = groupTextIntoLines(
             textContent.items,
             baseViewport.width,
             baseViewport.height,
-            i
+            i,
+            ctx,
+            scale
           );
           extractedLines.push(...pageLines);
         } catch (textErr) {
@@ -326,7 +422,7 @@ export default function PdfEditorClient() {
     }
   }
 
-  // Handle global keyboard shortcuts
+  // Keyboard shortcuts
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -353,7 +449,7 @@ export default function PdfEditorClient() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedCustomElemId, activeEditingLineId]);
 
-  // Pointer move & up listeners for dragging/resizing custom elements
+  // Pointer move & up listeners for custom elements
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
       if (!dragRef.current) return;
@@ -407,18 +503,12 @@ export default function PdfEditorClient() {
     };
   }, []);
 
-  // Update existing line
   function updateTextLine(lineId: string, patch: Partial<EditableTextLine>) {
     setTextLines((prev) =>
-      prev.map((l) => {
-        if (l.id !== lineId) return l;
-        const updated = { ...l, ...patch, isEdited: true };
-        return updated;
-      })
+      prev.map((l) => (l.id === lineId ? { ...l, ...patch, isEdited: true } : l))
     );
   }
 
-  // Delete line
   function deleteTextLine(lineId: string) {
     setTextLines((prev) =>
       prev.map((l) => (l.id === lineId ? { ...l, isDeleted: true, isEdited: true } : l))
@@ -428,7 +518,6 @@ export default function PdfEditorClient() {
     }
   }
 
-  // Restore line
   function restoreTextLine(lineId: string) {
     setTextLines((prev) =>
       prev.map((l) =>
@@ -444,7 +533,6 @@ export default function PdfEditorClient() {
     );
   }
 
-  // Click on canvas to add new custom elements
   function handlePageCanvasClick(
     e: React.MouseEvent<HTMLDivElement>,
     pageNumber: number
@@ -469,7 +557,7 @@ export default function PdfEditorClient() {
         normY: clickY,
         normW: Math.min(0.35, 1 - clickX),
         normH: 0.05,
-        text: "New text line...",
+        text: "New text...",
         fontSize: 14,
         fontFamily: "Helvetica",
         color: "#0f172a",
@@ -542,7 +630,6 @@ export default function PdfEditorClient() {
     }
   }
 
-  // Page Controls
   function toggleDeletePage(pageNum: number) {
     setDeletedPages((prev) =>
       prev.includes(pageNum) ? prev.filter((p) => p !== pageNum) : [...prev, pageNum]
@@ -556,7 +643,6 @@ export default function PdfEditorClient() {
     });
   }
 
-  // Export / Download or Save Template
   async function handleExport(saveAsTemplate = false) {
     if (!file) return;
 
@@ -570,7 +656,6 @@ export default function PdfEditorClient() {
       formData.append("name", docName);
       formData.append("saveAsTemplate", saveAsTemplate ? "true" : "false");
 
-      // Filter only modified or deleted lines to send to backend
       const modifiedLines = textLines.filter((l) => l.isEdited || l.isDeleted);
 
       const editsPayload = {
@@ -673,7 +758,7 @@ export default function PdfEditorClient() {
           </div>
 
           <h3 className="text-lg font-bold text-slate-800 mb-1">
-            {loadingPdf ? "Detecting Text & Loading PDF..." : "Choose a PDF or Drag & Drop Here"}
+            {loadingPdf ? "Detecting Text, Colors & Styles..." : "Choose a PDF or Drag & Drop Here"}
           </h3>
           <p className="text-xs text-slate-500 mb-6 max-w-sm mx-auto">
             Loads document text into interactive editable blocks ready for real-time typing.
@@ -701,7 +786,7 @@ export default function PdfEditorClient() {
             </div>
             <h4 className="font-bold text-slate-800 text-sm mb-1">1-Click In-Place Text Editing</h4>
             <p className="text-xs text-slate-500">
-              Click any sentence or line in the PDF and start typing immediately. Replaces words with matching fonts and sizes.
+              Click any sentence or line in the PDF and start typing immediately with matching color, font-weight, and alignment.
             </p>
           </div>
 
@@ -945,12 +1030,13 @@ export default function PdfEditorClient() {
         </div>
       )}
 
-      {/* WORD-STYLE FORMATTING TOOLBAR (Appears when editing a line or custom text) */}
+      {/* ACTIVE LINE TYPOGRAPHIC TOOLBAR */}
       {activeLine && (
-        <div className="bg-slate-900 text-white border border-slate-800 rounded-xl px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in">
+        <div className="bg-slate-900 text-white border border-slate-800 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xl animate-in fade-in sticky top-2 z-50">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="font-bold text-blue-300 flex items-center gap-1">
-              <Edit3 className="w-3.5 h-3.5 text-blue-400" /> Editing Line:
+            <span className="font-bold text-blue-300 flex items-center gap-1.5">
+              <Edit3 className="w-4 h-4 text-blue-400" />
+              <span>Editing Line:</span>
             </span>
 
             {/* Font Family */}
@@ -963,83 +1049,116 @@ export default function PdfEditorClient() {
               }
               className="bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1 text-xs"
             >
-              <option value="Helvetica">Helvetica (Sans)</option>
+              <option value="Helvetica">Arial / Helvetica (Sans)</option>
               <option value="Times">Times Roman (Serif)</option>
               <option value="Courier">Courier (Mono)</option>
             </select>
 
-            {/* Font Size */}
+            {/* Font Size (+ / - / direct input) */}
             <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg p-0.5">
               <button
                 type="button"
                 onClick={() =>
                   updateTextLine(activeLine.id, {
-                    fontSize: Math.max(8, activeLine.fontSize - 1),
+                    fontSize: Math.max(7, Math.round((activeLine.fontSize - 0.5) * 10) / 10),
                   })
                 }
-                className="px-2 py-0.5 text-slate-300 hover:text-white"
+                className="px-2 py-0.5 text-slate-300 hover:text-white font-bold cursor-pointer"
+                title="Decrease font size"
               >
                 -
               </button>
-              <span className="px-1 font-semibold">{activeLine.fontSize}px</span>
+              <span className="px-1.5 font-bold text-white min-w-[36px] text-center">
+                {activeLine.fontSize}pt
+              </span>
               <button
                 type="button"
                 onClick={() =>
                   updateTextLine(activeLine.id, {
-                    fontSize: Math.min(48, activeLine.fontSize + 1),
+                    fontSize: Math.min(48, Math.round((activeLine.fontSize + 0.5) * 10) / 10),
                   })
                 }
-                className="px-2 py-0.5 text-slate-300 hover:text-white"
+                className="px-2 py-0.5 text-slate-300 hover:text-white font-bold cursor-pointer"
+                title="Increase font size"
               >
                 +
               </button>
             </div>
 
-            {/* Bold & Italic */}
-            <div className="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg p-0.5">
-              <button
-                type="button"
-                onClick={() =>
-                  updateTextLine(activeLine.id, { isBold: !activeLine.isBold })
-                }
-                className={`w-6 h-6 flex items-center justify-center rounded font-bold cursor-pointer ${
-                  activeLine.isBold
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-300 hover:text-white"
-                }`}
-              >
-                B
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  updateTextLine(activeLine.id, { isItalic: !activeLine.isItalic })
-                }
-                className={`w-6 h-6 flex items-center justify-center rounded italic font-serif cursor-pointer ${
-                  activeLine.isItalic
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-300 hover:text-white"
-                }`}
-              >
-                I
-              </button>
-            </div>
+            {/* Bold Toggle */}
+            <button
+              type="button"
+              onClick={() =>
+                updateTextLine(activeLine.id, { isBold: !activeLine.isBold })
+              }
+              className={`w-7 h-7 flex items-center justify-center rounded-lg font-black text-xs transition cursor-pointer ${
+                activeLine.isBold
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "bg-slate-800 text-slate-300 hover:text-white border border-slate-700"
+              }`}
+              title="Toggle Bold (B)"
+            >
+              B
+            </button>
 
-            {/* Color Swatches */}
-            <div className="flex items-center gap-1.5">
-              {COLOR_SWATCHES.map((hex) => (
-                <button
-                  key={hex}
-                  type="button"
-                  onClick={() => updateTextLine(activeLine.id, { color: hex })}
-                  className="w-4 h-4 rounded-full border border-slate-600 cursor-pointer relative"
-                  style={{ backgroundColor: hex }}
-                >
-                  {activeLine.color === hex && (
-                    <Check className="w-2.5 h-2.5 text-white absolute inset-0 m-auto" />
-                  )}
-                </button>
-              ))}
+            {/* Italic Toggle */}
+            <button
+              type="button"
+              onClick={() =>
+                updateTextLine(activeLine.id, { isItalic: !activeLine.isItalic })
+              }
+              className={`w-7 h-7 flex items-center justify-center rounded-lg italic font-serif text-xs transition cursor-pointer ${
+                activeLine.isItalic
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "bg-slate-800 text-slate-300 hover:text-white border border-slate-700"
+              }`}
+              title="Toggle Italic (I)"
+            >
+              I
+            </button>
+
+            {/* Text Color Picker & Swatches */}
+            <div className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
+              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Palette className="w-3 h-3" /> Color:
+              </span>
+
+              {/* Native Color Picker */}
+              <input
+                type="color"
+                value={activeLine.color.length === 7 ? activeLine.color : "#000000"}
+                onChange={(e) => updateTextLine(activeLine.id, { color: e.target.value })}
+                className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent p-0"
+                title="Choose custom color"
+              />
+
+              {/* Detected / Preset Swatches */}
+              <div className="flex items-center gap-1 ml-1">
+                {/* Active Color indicator pill if not in presets */}
+                {!COLOR_SWATCHES.includes(activeLine.color) && (
+                  <button
+                    type="button"
+                    onClick={() => updateTextLine(activeLine.id, { color: activeLine.color })}
+                    className="w-4 h-4 rounded-full border-2 border-white shadow-xs relative"
+                    style={{ backgroundColor: activeLine.color }}
+                    title={`Detected Original Color (${activeLine.color})`}
+                  />
+                )}
+
+                {COLOR_SWATCHES.map((hex) => (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => updateTextLine(activeLine.id, { color: hex })}
+                    className="w-4 h-4 rounded-full border border-slate-600 cursor-pointer relative transition hover:scale-110"
+                    style={{ backgroundColor: hex }}
+                  >
+                    {activeLine.color.toLowerCase() === hex.toLowerCase() && (
+                      <Check className="w-2.5 h-2.5 text-white absolute inset-0 m-auto" />
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -1060,7 +1179,7 @@ export default function PdfEditorClient() {
             <button
               type="button"
               onClick={() => deleteTextLine(activeLine.id)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-900/60 hover:bg-red-800 text-red-200 text-xs font-semibold cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-900/70 hover:bg-red-800 text-red-200 text-xs font-semibold cursor-pointer"
               title="Delete this entire line from the PDF (Word-style erase)"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -1070,7 +1189,7 @@ export default function PdfEditorClient() {
             <button
               type="button"
               onClick={() => setActiveEditingLineId(null)}
-              className="flex items-center gap-1 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs cursor-pointer ml-1"
+              className="flex items-center gap-1 px-3.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs cursor-pointer ml-1"
             >
               <Check className="w-3.5 h-3.5" />
               <span>Done</span>
@@ -1248,16 +1367,21 @@ export default function PdfEditorClient() {
                       }
 
                       if (isEditing) {
-                        // Currently Active Editable Line: Opaque white cover with live input
+                        // Currently Active Editable Line: Exact baseline alignment, matching color, font-weight, auto-expanding width
+                        const charEstimateWidth = (line.currentText.length * line.fontSize * 0.62) / 8.4;
+                        const dynamicWidth = Math.max(line.normW * 100, charEstimateWidth + 5);
+                        const maxWidth = (1 - line.normX) * 100;
+
                         return (
                           <div
                             key={line.id}
-                            className="absolute bg-white shadow-md ring-2 ring-blue-600 rounded-xs flex items-center px-1 z-30"
+                            className="absolute bg-white shadow-md ring-2 ring-blue-600 rounded-xs flex items-center z-30"
                             style={{
                               left: `${line.normX * 100}%`,
                               top: `${line.normY * 100}%`,
-                              width: `${Math.max(line.normW * 100, 25)}%`,
-                              minHeight: `${line.normH * 100}%`,
+                              width: `${Math.min(dynamicWidth, maxWidth)}%`,
+                              height: `${line.normH * 100}%`,
+                              padding: "0 2px",
                             }}
                             onClick={(e) => e.stopPropagation()}
                           >
@@ -1281,16 +1405,18 @@ export default function PdfEditorClient() {
                                     ? "'Times New Roman', serif"
                                     : line.fontFamily === "Courier"
                                     ? "Courier, monospace"
-                                    : "Helvetica, Arial, sans-serif",
-                                fontWeight: line.isBold ? "bold" : "normal",
+                                    : "Arial, Helvetica, sans-serif",
+                                fontWeight: line.isBold ? 700 : 400,
                                 fontStyle: line.isItalic ? "italic" : "normal",
+                                height: "100%",
+                                lineHeight: "1",
                               }}
-                              className="w-full bg-transparent border-none outline-hidden p-0 m-0 leading-tight"
+                              className="w-full bg-white border-none outline-hidden p-0 m-0"
                             />
                             <button
                               type="button"
                               onClick={() => deleteTextLine(line.id)}
-                              className="p-1 text-slate-400 hover:text-red-600 ml-1 cursor-pointer shrink-0"
+                              className="p-0.5 text-slate-400 hover:text-red-600 ml-1 cursor-pointer shrink-0"
                               title="Delete this line"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1300,11 +1426,11 @@ export default function PdfEditorClient() {
                       }
 
                       if (line.isEdited) {
-                        // Edited Line (Saved): Solid white cover with newly typed text displayed
+                        // Edited Line (Saved): Solid white cover with newly typed text displayed with exact typography
                         return (
                           <div
                             key={line.id}
-                            className="absolute bg-white border border-blue-400 rounded-xs flex items-center px-1 cursor-pointer group hover:ring-1 hover:ring-blue-500 z-10"
+                            className="absolute bg-white border border-blue-400 rounded-xs flex items-center px-0.5 cursor-pointer group hover:ring-1 hover:ring-blue-500 z-10"
                             style={{
                               left: `${line.normX * 100}%`,
                               top: `${line.normY * 100}%`,
@@ -1326,11 +1452,12 @@ export default function PdfEditorClient() {
                                     ? "'Times New Roman', serif"
                                     : line.fontFamily === "Courier"
                                     ? "Courier, monospace"
-                                    : "Helvetica, Arial, sans-serif",
-                                fontWeight: line.isBold ? "bold" : "normal",
+                                    : "Arial, Helvetica, sans-serif",
+                                fontWeight: line.isBold ? 700 : 400,
                                 fontStyle: line.isItalic ? "italic" : "normal",
+                                lineHeight: "1",
                               }}
-                              className="truncate leading-tight block w-full"
+                              className="truncate block w-full"
                             >
                               {line.currentText}
                             </span>
@@ -1426,8 +1553,8 @@ export default function PdfEditorClient() {
                                     ? "'Times New Roman', serif"
                                     : elem.fontFamily === "Courier"
                                     ? "Courier, monospace"
-                                    : "Helvetica, Arial, sans-serif",
-                                fontWeight: elem.isBold ? "bold" : "normal",
+                                    : "Arial, Helvetica, sans-serif",
+                                fontWeight: elem.isBold ? 700 : 400,
                                 fontStyle: elem.isItalic ? "italic" : "normal",
                                 lineHeight: "1.25",
                               }}
