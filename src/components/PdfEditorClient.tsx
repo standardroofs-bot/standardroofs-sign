@@ -97,12 +97,15 @@ const STAMP_PRESETS = [
 
 const COLOR_SWATCHES = [
   "#000000",
-  "#881337", // Maroon / Deep Red
+  "#1f1f1f", // Charcoal Dark
+  "#781717", // Standard Roofs Maroon Header
+  "#9b1b1f", // Accent Maroon Red
   "#dc2626", // Red
   "#1e3a8a", // Navy Blue
   "#2563eb", // Blue
   "#15803d", // Green
   "#475569", // Slate
+  "#595959", // Grey
 ];
 
 // Sample rendered canvas to detect exact pixel color and bold weight
@@ -118,9 +121,7 @@ function sampleLineStyle(
   let isBold =
     fnLower.includes("bold") ||
     fnLower.includes("black") ||
-    fnLower.includes("heavy") ||
-    fnLower.endsWith("_f3") ||
-    fnLower.includes("f3");
+    fnLower.includes("heavy");
 
   let detectedColor = "#0f172a";
 
@@ -155,7 +156,7 @@ function sampleLineStyle(
       // Chromatic color detection (e.g. Maroon red, Dark blue)
       const maxVal = Math.max(r, g, b);
       const minVal = Math.min(r, g, b);
-      if (maxVal - minVal > 22) {
+      if (maxVal - minVal > 20) {
         coloredCount++;
         colR += r;
         colG += g;
@@ -163,7 +164,7 @@ function sampleLineStyle(
       }
     }
 
-    if (coloredCount > 8) {
+    if (coloredCount > 6) {
       const avgR = Math.round(colR / coloredCount);
       const avgG = Math.round(colG / coloredCount);
       const avgB = Math.round(colB / coloredCount);
@@ -177,7 +178,7 @@ function sampleLineStyle(
 
     // Density check for bold
     const density = darkCount / (sampleW * sampleH);
-    if (density > 0.16) {
+    if (density > 0.15) {
       isBold = true;
     }
   } catch (e) {
@@ -258,7 +259,9 @@ export default function PdfEditorClient() {
     pageH: number,
     pageNum: number,
     ctx: CanvasRenderingContext2D,
-    scale: number
+    scale: number,
+    page?: any,
+    opTextChunks: { text: string; color: string; fontName: string }[] = []
   ): EditableTextLine[] => {
     const valid = items.filter(
       (it) => typeof it.str === "string" && it.str.trim().length > 0 && it.transform
@@ -314,19 +317,67 @@ export default function PdfEditorClient() {
     }
 
     return rawLines.map((l, idx) => {
-      // Sample style from canvas pixels
-      const pixelX = (l.x - 2) * scale;
-      const pixelY = (pageH - (l.y + l.h * 1.05)) * scale;
+      // 1. Resolve actual font object from PDF page common objects
+      let fontObj: any = null;
+      try {
+        if (page?.commonObjs?.has?.(l.fontName)) {
+          fontObj = page.commonObjs.get(l.fontName);
+        }
+      } catch (_) {}
+
+      // 2. Resolve exact color and font from PDF vector operator list
+      let matchedColor: string | null = null;
+      const cleanLineText = l.text.replace(/\s+/g, " ").trim();
+      const candidates = opTextChunks.filter(
+        (c) =>
+          c.text.length >= 3 &&
+          (cleanLineText.includes(c.text) || c.text.includes(cleanLineText))
+      );
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => b.text.length - a.text.length);
+        matchedColor = candidates[0].color;
+        if (!fontObj && candidates[0].fontName && page?.commonObjs?.has?.(candidates[0].fontName)) {
+          try {
+            fontObj = page.commonObjs.get(candidates[0].fontName);
+          } catch (_) {}
+        }
+      }
+
+      const realFontName = String(fontObj?.name || l.fontName || "");
+      const isFontObjBold = Boolean(
+        fontObj?.bold ||
+        /bold|black|heavy|w[6-9]00/i.test(realFontName)
+      );
+      const isFontObjItalic = Boolean(
+        fontObj?.italic ||
+        /italic|oblique/i.test(realFontName)
+      );
+
+      let fontFamily: "Helvetica" | "Times" | "Courier" = "Helvetica";
+      if (/times|roman/i.test(realFontName)) fontFamily = "Times";
+      else if (/courier|mono/i.test(realFontName)) fontFamily = "Courier";
+
+      // 3. Fallback: sample style from canvas pixels
+      const pixelX = Math.max(0, (l.x - 2) * scale);
+      const pixelY = Math.max(0, (pageH - (l.y + l.h * 0.95)) * scale);
       const pixelW = (l.w + 6) * scale;
-      const pixelH = (l.h * 1.25) * scale;
-      const sampled = sampleLineStyle(ctx, pixelX, pixelY, pixelW, pixelH, l.fontName);
+      const pixelH = l.h * 1.25 * scale;
+      const sampled = sampleLineStyle(ctx, pixelX, pixelY, pixelW, pixelH, realFontName);
 
       // Intelligent bold detection for headers, section titles, and key labels
       const trimmed = l.text.trim();
       const isAllUpper = trimmed.length >= 3 && trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed);
       const isNumberedHeader = /^\d+\.\s+[A-Z]/.test(trimmed);
       const isKeyLabel = trimmed.endsWith(":") || /^[A-Z][a-zA-Z\s]+:/.test(trimmed);
-      const detectedBold = sampled.isBold || isNumberedHeader || isAllUpper || isKeyLabel;
+      const detectedBold = Boolean(
+        isFontObjBold ||
+        sampled.isBold ||
+        isNumberedHeader ||
+        isAllUpper ||
+        isKeyLabel
+      );
+
+      const finalColor = matchedColor || sampled.color || "#0f172a";
 
       return {
         id: `p${pageNum}_line_${idx}`,
@@ -337,10 +388,10 @@ export default function PdfEditorClient() {
         isDeleted: false,
         fontSize: Math.max(8, Math.min(48, l.fontSize)),
         scale: Math.round(scale * 1000) / 1000,
-        fontFamily: "Helvetica",
-        color: sampled.color,
+        fontFamily,
+        color: finalColor,
         isBold: detectedBold,
-        isItalic: false,
+        isItalic: isFontObjItalic,
         normX: Math.max(0, (l.x - 2) / pageW),
         normY: Math.max(0, (pageH - (l.y + l.h * 1.05)) / pageH),
         normW: Math.min(1, (l.w + 6) / pageW),
@@ -399,13 +450,57 @@ export default function PdfEditorClient() {
         // 2. Extract text items & sample exact font styles & colors
         try {
           const textContent = await page.getTextContent();
+          const opTextChunks: { text: string; color: string; fontName: string }[] = [];
+          try {
+            const opList = await page.getOperatorList();
+            let curColor = "#000000";
+            let curFont = "";
+            for (let idx = 0; idx < opList.fnArray.length; idx++) {
+              const fn = opList.fnArray[idx];
+              const args = opList.argsArray[idx];
+              if (
+                fn === pdfjsLib.OPS.setFillRGBColor &&
+                (Array.isArray(args) || args instanceof Uint8ClampedArray)
+              ) {
+                const r = Math.min(255, Math.max(0, args[0] ?? 0));
+                const g = Math.min(255, Math.max(0, args[1] ?? 0));
+                const b = Math.min(255, Math.max(0, args[2] ?? 0));
+                curColor =
+                  "#" + [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("");
+              } else if (fn === pdfjsLib.OPS.setFont) {
+                curFont = args[0] || "";
+              } else if (
+                fn === pdfjsLib.OPS.showText ||
+                fn === pdfjsLib.OPS.showSpacedText
+              ) {
+                const items = Array.isArray(args[0]) ? args[0] : [args[0]];
+                let str = "";
+                for (const item of items) {
+                  if (typeof item === "object" && item !== null) {
+                    str += item.unicode || item.char || item.fontChar || "";
+                  } else if (typeof item === "string") {
+                    str += item;
+                  }
+                }
+                str = str.replace(/\s+/g, " ").trim();
+                if (str && str.length >= 2) {
+                  opTextChunks.push({ text: str, color: curColor, fontName: curFont });
+                }
+              }
+            }
+          } catch (opErr) {
+            console.warn("Could not parse operator list for page colors:", opErr);
+          }
+
           const pageLines = groupTextIntoLines(
             textContent.items,
             baseViewport.width,
             baseViewport.height,
             i,
             ctx,
-            scale
+            scale,
+            page,
+            opTextChunks
           );
           extractedLines.push(...pageLines);
         } catch (textErr) {
