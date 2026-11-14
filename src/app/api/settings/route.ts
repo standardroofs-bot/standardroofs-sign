@@ -81,6 +81,7 @@ export async function PATCH(req: Request) {
     whatsappWebhookUrl: String(body.whatsappWebhookUrl || "").trim(),
     smsWebhookUrl: String(body.smsWebhookUrl || "").trim(),
     fast2smsApiKey: String(body.fast2smsApiKey || "").trim(),
+    googleMapsApiKey: String(body.googleMapsApiKey || "").trim(),
   };
 
   if (body.smtpPass && body.smtpPass !== "••••••••") {

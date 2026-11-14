@@ -1,3 +1,5 @@
+import { prisma } from "@/lib/prisma";
+
 export interface GeocodeResult {
   address: string;
   mapsUrl: string;
@@ -9,8 +11,20 @@ export async function reverseGeocode(
 ): Promise<GeocodeResult> {
   const mapsUrl = `https://maps.google.com/?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
 
-  // 1. Google Maps Geocoding API (Doorstep Indian Precision if GOOGLE_MAPS_API_KEY is configured)
-  const gApiKey = process.env.GOOGLE_MAPS_API_KEY;
+  // 1. Google Maps Geocoding API (Doorstep Indian Precision if GOOGLE_MAPS_API_KEY is configured in env or DB)
+  let gApiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!gApiKey) {
+    try {
+      const settings = await prisma.companySettings.findUnique({
+        where: { id: "default" },
+        select: { googleMapsApiKey: true },
+      });
+      if (settings?.googleMapsApiKey) {
+        gApiKey = settings.googleMapsApiKey.trim();
+      }
+    } catch (_) {}
+  }
+
   if (gApiKey) {
     try {
       const res = await fetch(
@@ -25,142 +39,133 @@ export async function reverseGeocode(
           };
         }
       }
-    } catch {
-      // Ignore Google API failure, fall through to Nominatim
+    } catch (gErr) {
+      console.warn("Google Maps Geocoding API error:", gErr);
     }
   }
 
-  // 2. OpenStreetMap Nominatim with Building-Level Zoom (18)
+  // 2. OpenStreetMap Nominatim with dual-zoom validation & BigDataCloud Google Plus Code integration
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
-    const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
-      lat
-    )}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1`;
-
-    const res = await fetch(nominatimUrl, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "StandardESign/1.0 (info@standardroofs.in; https://standardroofs.in)",
-        Accept: "application/json",
-      },
-    });
+    // Fetch street-level details (zoom 18) and town-level confirmation (zoom 12) in parallel
+    const [res18, res12, bdcRes] = await Promise.allSettled([
+      fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+          lat
+        )}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1`,
+        {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "StandardESign/1.0 (info@standardroofs.in; https://standardroofs.in)",
+            Accept: "application/json",
+          },
+        }
+      ),
+      fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
+          lat
+        )}&lon=${encodeURIComponent(lng)}&zoom=12&addressdetails=1`,
+        {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "StandardESign/1.0 (info@standardroofs.in; https://standardroofs.in)",
+            Accept: "application/json",
+          },
+        }
+      ),
+      fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(
+          lat
+        )}&longitude=${encodeURIComponent(lng)}&localityLanguage=en`,
+        { signal: controller.signal }
+      ),
+    ]);
 
     clearTimeout(timeoutId);
 
-    if (res.ok) {
-      const data = await res.json();
-      const addr = data.address || {};
+    let addr18: Record<string, string> = {};
+    if (res18.status === "fulfilled" && res18.value.ok) {
+      const d = await res18.value.json();
+      addr18 = d.address || {};
+    }
 
-      // Building / place / business / landmark
-      const place =
-        addr.amenity ||
-        addr.building ||
-        addr.shop ||
-        addr.office ||
-        addr.leisure ||
-        addr.tourism ||
-        addr.commercial ||
-        "";
+    let trueTown = "";
+    let truePostcode = "";
+    if (res12.status === "fulfilled" && res12.value.ok) {
+      const d12 = await res12.value.json();
+      const a12 = d12.address || {};
+      trueTown = a12.town || a12.village || a12.city || "";
+      truePostcode = a12.postcode || "";
+    }
 
-      // House / Door / Unit number
-      const houseNumber = addr.house_number || addr.house_name || "";
-
-      // Road / Street
-      const road = addr.road || addr.street || addr.footway || "";
-
-      // Assemble door/building + road
-      const streetLine = [houseNumber, place, road].filter(Boolean).join(" ");
-
-      // Neighborhood / locality / suburb / industrial area
-      const neighbourhood =
-        addr.neighbourhood ||
-        addr.suburb ||
-        addr.residential ||
-        addr.industrial ||
-        addr.quarter ||
-        "";
-
-      // City / Town / Village / Taluk
-      const locality =
-        addr.city ||
-        addr.town ||
-        addr.village ||
-        addr.municipality ||
-        addr.city_district ||
-        "";
-
-      // District / County
-      const district = addr.county || addr.state_district || "";
-
-      // State and Postcode
-      const state = addr.state || "";
-      const postcode = addr.postcode || "";
-      const country = addr.country || "India";
-
-      // Build hierarchical specific address
-      const parts = [
-        streetLine,
-        neighbourhood,
-        locality && locality !== neighbourhood ? locality : "",
-        district && district !== locality && district !== neighbourhood ? district : "",
-        state && postcode ? `${state} ${postcode}` : state || postcode,
-        country,
-      ].filter(Boolean);
-
-      if (parts.length > 0) {
-        return {
-          address: parts.join(", "),
-          mapsUrl,
-        };
-      }
-
-      if (data.display_name) {
-        return {
-          address: String(data.display_name).slice(0, 140),
-          mapsUrl,
-        };
+    let plusCode = "";
+    if (bdcRes.status === "fulfilled" && bdcRes.value.ok) {
+      const bdcData = await bdcRes.value.json();
+      if (bdcData.plusCode) {
+        // e.g. "7J3V8MQ5+9M" -> local "8MQ5+9M"
+        const clean = String(bdcData.plusCode).replace(/^[A-Z0-9]{4}/, "");
+        plusCode = clean.trim();
       }
     }
-  } catch (err) {
-    console.warn("Nominatim reverse geocode error or timeout:", err);
-  }
 
-  // 3. Secondary Lookup: BigDataCloud Reverse Geocoding API
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    // Specific Landmark / Building / Shop / POI
+    const place =
+      addr18.amenity ||
+      addr18.building ||
+      addr18.shop ||
+      addr18.office ||
+      addr18.leisure ||
+      addr18.tourism ||
+      addr18.commercial ||
+      "";
 
-    const bdcUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(
-      lat
-    )}&longitude=${encodeURIComponent(lng)}&localityLanguage=en`;
+    const houseNumber = addr18.house_number || addr18.house_name || "";
+    const road = addr18.road || addr18.street || addr18.footway || "";
+    const streetLine = [houseNumber, place, road].filter(Boolean).join(" ");
 
-    const res = await fetch(bdcUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
+    // Indian Local Governance Hierarchy:
+    // If town/village is distinct (e.g. "Nasiyanur"), prioritize it and eliminate erroneous overlapping suburb boundaries (like "Villarasampatti")
+    const townOrVillage = trueTown || addr18.town || addr18.village || addr18.city || "";
 
-    if (res.ok) {
-      const data = await res.json();
-      const locality = data.locality || data.city || "";
-      const state = data.principalSubdivision || "";
-      const postcode = data.postcode || "";
-      const country = data.countryName || "India";
-
-      const parts = [
-        locality,
-        state && postcode ? `${state} ${postcode}` : state || postcode,
-        country,
-      ].filter(Boolean);
-
-      if (parts.length > 0) {
-        return {
-          address: parts.join(", "),
-          mapsUrl,
-        };
+    let subArea = "";
+    if (addr18.suburb && addr18.suburb !== townOrVillage) {
+      // In Indian OSM data, large city suburb boundaries often falsely cover rural taluks/towns
+      // Only include suburb if there is NO specific town detected or if suburb is a direct local ward
+      if (!addr18.town && !trueTown) {
+        subArea = addr18.suburb;
       }
+    } else if (addr18.neighbourhood && addr18.neighbourhood !== townOrVillage) {
+      subArea = addr18.neighbourhood;
+    }
+
+    const district = addr18.county || addr18.state_district || "Erode";
+    const state = addr18.state || "Tamil Nadu";
+    const postcode = truePostcode || addr18.postcode || "";
+    const country = addr18.country || "India";
+
+    const parts = [
+      streetLine,
+      subArea,
+      townOrVillage,
+      district !== townOrVillage ? district : "",
+      state && postcode ? `${state} ${postcode}` : state || postcode,
+      country,
+    ].filter(Boolean);
+
+    if (parts.length > 0) {
+      let finalAddr = parts.join(", ");
+      if (plusCode && !finalAddr.includes(plusCode)) {
+        finalAddr += ` (${plusCode})`;
+      }
+      return {
+        address: finalAddr,
+        mapsUrl,
+      };
     }
   } catch (err) {
-    console.warn("BigDataCloud reverse geocode error:", err);
+    console.warn("Enhanced reverse geocode error:", err);
   }
 
   // Fallback: GPS Coordinates formatted representation

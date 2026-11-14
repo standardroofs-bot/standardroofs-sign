@@ -106,6 +106,7 @@ model CompanySettings {
   whatsappPhoneNumberId String @default("")
   msg91AuthKey       String   @default("")
   msg91TemplateId    String   @default("")
+  googleMapsApiKey   String   @default("")
   updatedAt          DateTime @updatedAt
 }
 
