@@ -64,11 +64,20 @@ export default function RequestDetailClient({
   const [voiding, setVoiding] = useState(false);
 
   function getSignUrl(token: string) {
-    if (publicBaseUrl) {
+    if (typeof window !== "undefined") {
+      const currentOrigin = window.location.origin.replace(/\/+$/, "");
+      const isOutdatedTunnel =
+        publicBaseUrl.includes("trycloudflare.com") &&
+        !publicBaseUrl.includes(window.location.host);
+
+      // If on localhost or if publicBaseUrl is missing/outdated tunnel, use current origin
+      if (!publicBaseUrl || isOutdatedTunnel || window.location.hostname === "localhost") {
+        return `${currentOrigin}/s/${token}`;
+      }
       return `${publicBaseUrl.replace(/\/+$/, "")}/s/${token}`;
     }
-    if (typeof window !== "undefined") {
-      return `${window.location.origin}/s/${token}`;
+    if (publicBaseUrl) {
+      return `${publicBaseUrl.replace(/\/+$/, "")}/s/${token}`;
     }
     return `/s/${token}`;
   }

@@ -96,6 +96,15 @@ export async function PATCH(req: Request) {
     },
   });
 
+  if (user.activeOrg?.id) {
+    await prisma.organization.update({
+      where: { id: user.activeOrg.id },
+      data: {
+        publicBaseUrl: updateData.publicBaseUrl as string,
+      },
+    }).catch(() => {});
+  }
+
   return NextResponse.json({
     settings: { ...updated, smtpPass: updated.smtpPass ? "••••••••" : "" },
   });

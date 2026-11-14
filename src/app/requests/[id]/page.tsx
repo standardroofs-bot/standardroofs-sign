@@ -35,7 +35,7 @@ export default async function RequestDetailPage({
   return (
     <AppShell user={user}>
       <RequestDetailClient
-        publicBaseUrl={settings?.publicBaseUrl || ""}
+        publicBaseUrl={user.activeOrg?.publicBaseUrl || settings?.publicBaseUrl || ""}
         request={{
           id: req.id,
           title: req.title,
