@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ShieldCheck,
@@ -9,6 +10,8 @@ import {
   XCircle,
   FileSignature,
   Search,
+  Loader2,
+  QrCode,
 } from "lucide-react";
 
 interface VerifyResult {
@@ -34,11 +37,28 @@ interface VerifyResult {
   };
 }
 
-export default function VerifyPage() {
-  const [requestId, setRequestId] = useState("");
+function VerifyContent() {
+  const searchParams = useSearchParams();
+  const [requestId, setRequestId] = useState(searchParams.get("id") || searchParams.get("requestId") || "");
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const qId = searchParams.get("id") || searchParams.get("requestId");
+    const qHash = searchParams.get("hash");
+    if (qId || qHash) {
+      setLoading(true);
+      fetch(`/api/verify?id=${encodeURIComponent(qId || "")}&hash=${encodeURIComponent(qHash || "")}`)
+        .then((res) => res.json())
+        .then((data) => {
+          setResult(data);
+          if (qId) setRequestId(qId);
+        })
+        .catch((err) => console.error("Auto-verify error:", err))
+        .finally(() => setLoading(false));
+    }
+  }, [searchParams]);
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault();
@@ -185,6 +205,20 @@ export default function VerifyPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function VerifyPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <Loader2 className="w-6 h-6 animate-spin text-orange-700" />
+        </div>
+      }
+    >
+      <VerifyContent />
+    </Suspense>
   );
 }
 

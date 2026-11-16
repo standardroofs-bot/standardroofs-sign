@@ -18,6 +18,9 @@ import {
   Check,
   AlertCircle,
   ExternalLink,
+  Lock,
+  ShieldCheck,
+  FileCheck,
 } from "lucide-react";
 import {
   CATEGORY_LABELS,
@@ -49,6 +52,13 @@ interface BulkResultItem {
   };
 }
 
+const AVAILABLE_ATTACHMENTS = [
+  { id: "pan", label: "PAN Card", desc: "Signer must upload clear photo of PAN card" },
+  { id: "aadhaar", label: "Aadhaar Card (Masked)", desc: "UIDAI compliant with first 8 digits masked" },
+  { id: "gst", label: "GST Certificate / Registration", desc: "Business tax registration proof" },
+  { id: "cheque", label: "Cancelled Cheque / Bank Proof", desc: "Bank account verification proof" },
+];
+
 export default function NewRequestClient({
   templates,
   initialTemplateId,
@@ -78,6 +88,10 @@ export default function NewRequestClient({
     "SMS",
   ]);
   const [requirePhotoLocation, setRequirePhotoLocation] = useState(false);
+  const [isConfidential, setIsConfidential] = useState(false);
+  const [accessPasscode, setAccessPasscode] = useState("");
+  const [requireAttachments, setRequireAttachments] = useState(false);
+  const [selectedAttachments, setSelectedAttachments] = useState<string[]>([]);
   const [signers, setSigners] = useState<SignerDraft[]>([]);
   const [bulkText, setBulkText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -166,6 +180,14 @@ export default function NewRequestClient({
           message,
           channels,
           requirePhotoLocation,
+          isConfidential,
+          accessPasscode: isConfidential ? accessPasscode.trim() : null,
+          requiredAttachments: requireAttachments
+            ? selectedAttachments.map((id) => {
+                const found = AVAILABLE_ATTACHMENTS.find((a) => a.id === id);
+                return { id, label: found?.label || id, required: true };
+              })
+            : [],
           signers,
           bulkRecipients,
         }),
@@ -499,17 +521,129 @@ export default function NewRequestClient({
           </div>
         </div>
 
-        <label className="flex items-center gap-2 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={requirePhotoLocation}
-            onChange={(e) => setRequirePhotoLocation(e.target.checked)}
-            className="accent-red-800"
-          />
-          <span>
-            Require Signer Live Photo + GPS Location (Proof of Presence on Audit Certificate)
-          </span>
-        </label>
+        {/* Security, Confidentiality & KYC Suite */}
+        <div className="p-4 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-indigo-50/20 space-y-3.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-indigo-700" />
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                Security, Confidentiality &amp; KYC Proofs
+              </span>
+            </div>
+            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">
+              Bank-Grade Protection
+            </span>
+          </div>
+
+          {/* Access PIN Gate */}
+          <div className="space-y-2">
+            <label className="flex items-start gap-2.5 cursor-pointer text-xs font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                checked={isConfidential}
+                onChange={(e) => {
+                  setIsConfidential(e.target.checked);
+                  if (!e.target.checked) setAccessPasscode("");
+                }}
+                className="mt-0.5 accent-indigo-700 rounded"
+              />
+              <div>
+                <span>Lock Document with Access Passcode / PIN</span>
+                <p className="text-[11px] font-normal text-slate-500">
+                  Recipient cannot view or sign the document without entering this PIN.
+                </p>
+              </div>
+            </label>
+
+            {isConfidential && (
+              <div className="ml-6 flex items-center gap-2 max-w-xs">
+                <input
+                  type="text"
+                  maxLength={12}
+                  value={accessPasscode}
+                  onChange={(e) => setAccessPasscode(e.target.value)}
+                  placeholder="Enter 4-6 digit PIN or secret word (e.g. 5824)"
+                  className="w-full px-3 py-1.5 border border-indigo-300 rounded-lg text-xs font-mono bg-white shadow-2xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Biometric Proof of Presence */}
+          <label className="flex items-start gap-2.5 cursor-pointer text-xs font-semibold text-slate-800">
+            <input
+              type="checkbox"
+              checked={requirePhotoLocation}
+              onChange={(e) => setRequirePhotoLocation(e.target.checked)}
+              className="mt-0.5 accent-indigo-700 rounded"
+            />
+            <div>
+              <span>Biometric Sign-on-Selfie &amp; GPS Location Stamp</span>
+              <p className="text-[11px] font-normal text-slate-500">
+                Signer must capture live front-camera selfie &amp; GPS landmark to verify presence.
+              </p>
+            </div>
+          </label>
+
+          {/* KYC ID Attachments */}
+          <div className="space-y-2 pt-2 border-t border-slate-200/60">
+            <label className="flex items-start gap-2.5 cursor-pointer text-xs font-semibold text-slate-800">
+              <input
+                type="checkbox"
+                checked={requireAttachments}
+                onChange={(e) => {
+                  setRequireAttachments(e.target.checked);
+                  if (!e.target.checked) setSelectedAttachments([]);
+                  else if (selectedAttachments.length === 0) setSelectedAttachments(["pan"]);
+                }}
+                className="mt-0.5 accent-indigo-700 rounded"
+              />
+              <div>
+                <span>Mandatory Official KYC ID Attachments (PAN / Aadhaar / GST)</span>
+                <p className="text-[11px] font-normal text-slate-500">
+                  Signer must upload official photo ID attachments before finalizing signature.
+                </p>
+              </div>
+            </label>
+
+            {requireAttachments && (
+              <div className="ml-6 grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                {AVAILABLE_ATTACHMENTS.map((att) => {
+                  const checked = selectedAttachments.includes(att.id);
+                  return (
+                    <button
+                      key={att.id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedAttachments((prev) =>
+                          prev.includes(att.id)
+                            ? prev.filter((x) => x !== att.id)
+                            : [...prev, att.id]
+                        )
+                      }
+                      className={`p-2.5 rounded-lg border text-left transition cursor-pointer flex items-start gap-2 ${
+                        checked
+                          ? "bg-indigo-50/80 border-indigo-400 text-indigo-950 shadow-2xs"
+                          : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        readOnly
+                        className="mt-0.5 accent-indigo-700 pointer-events-none"
+                      />
+                      <div>
+                        <div className="text-xs font-bold">{att.label}</div>
+                        <div className="text-[10px] text-slate-500 leading-tight">{att.desc}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Optional Collapsible Details */}
         <div>

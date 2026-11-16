@@ -20,6 +20,15 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Security gate: Confidential document requires passcode verification before serving PDF bytes
+  const actualPasscode = signer.accessPasscode || signer.request.accessPasscode;
+  if (actualPasscode && !signer.passcodeVerifiedAt && signer.status !== "SIGNED") {
+    return NextResponse.json(
+      { error: "Passcode verification required to access this confidential document." },
+      { status: 403 }
+    );
+  }
+
   const pathToRead =
     variant === "signed" && signer.request.signedPdfPath
       ? signer.request.signedPdfPath

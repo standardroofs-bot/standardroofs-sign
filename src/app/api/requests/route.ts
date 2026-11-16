@@ -131,6 +131,11 @@ export async function POST(req: Request) {
         ? Boolean(body.requirePhotoLocation)
         : template.requirePhotoLocation;
 
+    const isConfidential = Boolean(body.isConfidential);
+    const accessPasscode = body.accessPasscode ? String(body.accessPasscode).trim() : null;
+    const requiredAttachments = Array.isArray(body.requiredAttachments) ? body.requiredAttachments : [];
+    const requiredAttachmentsJson = JSON.stringify(requiredAttachments);
+
     const orgUrl = user.activeOrg.publicBaseUrl?.trim() || "";
     const settingsUrl = settings?.publicBaseUrl?.trim() || "";
     const configuredUrl = orgUrl || settingsUrl;
@@ -184,6 +189,9 @@ export async function POST(req: Request) {
             status: "PENDING",
             signingOrder: "SEQUENTIAL",
             requirePhotoLocation,
+            isConfidential,
+            accessPasscode,
+            requiredAttachmentsJson,
             expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
             originalPdfPath: copiedPdf.relativePath,
             fileSizeBytes: copiedPdf.sizeBytes,
@@ -200,6 +208,7 @@ export async function POST(req: Request) {
                   phone: cleanPhone,
                   channels: channels.join(","),
                   orderIndex: 0,
+                  accessPasscode: accessPasscode || null,
                   token,
                   status: "PENDING",
                 },
@@ -298,6 +307,9 @@ export async function POST(req: Request) {
         status: "PENDING",
         signingOrder,
         requirePhotoLocation,
+        isConfidential,
+        accessPasscode,
+        requiredAttachmentsJson,
         expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         originalPdfPath: copiedPdf.relativePath,
         fileSizeBytes: copiedPdf.sizeBytes,
@@ -313,6 +325,7 @@ export async function POST(req: Request) {
             phone: String(s.phone || "").trim(),
             channels: channels.join(","),
             orderIndex: idx,
+            accessPasscode: accessPasscode || null,
             token: generateSecureToken(),
             status:
               signingOrder === "SEQUENTIAL" && idx > 0 ? "WAITING" : "PENDING",

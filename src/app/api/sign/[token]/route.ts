@@ -62,6 +62,11 @@ export async function GET(
   }
 
   const fields = JSON.parse(signer.request.fieldsJson || "[]") as DocumentField[];
+  const actualPasscode = signer.accessPasscode || signer.request.accessPasscode;
+  const requiresPasscode = Boolean(actualPasscode);
+  const isPasscodeVerified = Boolean(signer.passcodeVerifiedAt) || signer.status === "SIGNED";
+  const requiredAttachments = JSON.parse(signer.request.requiredAttachmentsJson || "[]");
+  const attachments = JSON.parse(signer.attachmentsJson || "[]");
 
   return NextResponse.json({
     company: {
@@ -77,6 +82,7 @@ export async function GET(
       email: signer.email,
       status: signer.status,
       signedAt: signer.signedAt,
+      passcodeVerified: isPasscodeVerified,
     },
     request: {
       id: signer.request.id,
@@ -86,10 +92,15 @@ export async function GET(
       message: signer.request.message,
       status: signer.request.status,
       requirePhotoLocation: signer.request.requirePhotoLocation,
+      isConfidential: signer.request.isConfidential,
+      requiresPasscode,
+      isPasscodeVerified,
+      requiredAttachments,
+      attachments,
       signedHash: signer.request.signedHash,
       hasSignedPdf: Boolean(signer.request.signedPdfPath),
       signers: signer.request.signers,
-      fields,
+      fields: requiresPasscode && !isPasscodeVerified ? [] : fields,
     },
   });
 }
@@ -105,6 +116,7 @@ export async function POST(
     include: {
       request: {
         include: {
+          organization: true,
           signers: { orderBy: { orderIndex: "asc" } },
         },
       },
@@ -134,6 +146,65 @@ export async function POST(
   }
 
   const body = await req.json();
+
+  // Action: Verify Access Passcode / PIN for confidential documents
+  if (body.action === "VERIFY_PASSCODE") {
+    const entered = String(body.passcode || "").trim();
+    const actual = String(signer.accessPasscode || signer.request.accessPasscode || "").trim();
+    if (!actual || entered.toLowerCase() === actual.toLowerCase()) {
+      await prisma.signer.update({
+        where: { id: signer.id },
+        data: { passcodeVerifiedAt: new Date() },
+      });
+      const ip = getClientIp(req);
+      const ua = req.headers.get("user-agent") || "";
+      await prisma.auditEvent.create({
+        data: {
+          requestId: signer.requestId,
+          signerId: signer.id,
+          action: "VIEWED",
+          details: `${signer.name} (${signer.role}) unlocked confidential document with verified access PIN`,
+          ipAddress: ip,
+          userAgent: ua,
+        },
+      });
+      return NextResponse.json({ success: true, verified: true });
+    } else {
+      return NextResponse.json(
+        { error: "Incorrect Access PIN. Please verify with the sender." },
+        { status: 400 }
+      );
+    }
+  }
+
+  // Security Gate: Ensure passcode was verified before allowing final signature
+  const actualPasscode = signer.accessPasscode || signer.request.accessPasscode;
+  if (actualPasscode && !signer.passcodeVerifiedAt) {
+    return NextResponse.json(
+      { error: "Confidential document requires access PIN verification before signing." },
+      { status: 403 }
+    );
+  }
+
+  // Mandatory KYC Attachments validation
+  const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+  const requiredList = JSON.parse(signer.request.requiredAttachmentsJson || "[]") as Array<{
+    id: string;
+    label: string;
+    required: boolean;
+  }>;
+  for (const reqAtt of requiredList) {
+    if (reqAtt.required) {
+      const found = attachments.find((a: any) => a.id === reqAtt.id && Boolean(a.dataUrl));
+      if (!found) {
+        return NextResponse.json(
+          { error: `Please upload required official attachment: ${reqAtt.label}` },
+          { status: 400 }
+        );
+      }
+    }
+  }
+
   const fieldValues = (body.fieldValues || {}) as Record<string, string>;
   const photoDataUrl = typeof body.photoDataUrl === "string" ? body.photoDataUrl : null;
   const rawSignatureDataUrl = typeof body.rawSignatureDataUrl === "string" ? body.rawSignatureDataUrl : null;
@@ -190,6 +261,7 @@ export async function POST(
       locationLabel,
       locationAddress,
       locationCapturedAt: photoDataUrl || latitude != null ? now : null,
+      attachmentsJson: JSON.stringify(attachments),
       fieldValuesJson: JSON.stringify(fieldValues),
     },
   });
@@ -280,10 +352,13 @@ export async function POST(
       longitude: s.longitude,
       locationLabel: s.locationLabel,
       locationAddress: s.locationAddress,
+      passcodeVerified: Boolean(s.passcodeVerifiedAt),
+      attachments: JSON.parse(s.attachmentsJson || "[]"),
       fieldValues: JSON.parse(s.fieldValuesJson || "{}"),
     })),
-    companyName: settings?.companyName || "Standard Roofs",
-    companyWebsite: settings?.website || "https://www.standardroofs.in",
+    companyName: signer.request.organization?.name || settings?.companyName || "Standard e-Sign",
+    companyWebsite: signer.request.organization?.website || settings?.website || "https://www.standardroofs.in",
+    publicBaseUrl: signer.request.organization?.publicBaseUrl || settings?.publicBaseUrl || "",
   });
 
   const savedSigned = await savePdfBuffer(

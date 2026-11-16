@@ -2,6 +2,67 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sha256Buffer } from "@/lib/storage";
 
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const hashToFind = String(searchParams.get("hash") || "").trim();
+    const idToFind = String(searchParams.get("id") || searchParams.get("requestId") || "").trim();
+
+    if (!hashToFind && !idToFind) {
+      return NextResponse.json(
+        { error: "Provide a SHA-256 hash or Request ID." },
+        { status: 400 }
+      );
+    }
+
+    const match = await prisma.signatureRequest.findFirst({
+      where: {
+        OR: [
+          ...(hashToFind
+            ? [{ signedHash: hashToFind }, { originalHash: hashToFind }]
+            : []),
+          ...(idToFind ? [{ id: idToFind }] : []),
+        ],
+      },
+      include: {
+        signers: {
+          orderBy: { orderIndex: "asc" },
+          select: { role: true, name: true, email: true, status: true, signedAt: true },
+        },
+      },
+    });
+
+    if (!match) {
+      return NextResponse.json({ verified: false, hash: hashToFind });
+    }
+
+    return NextResponse.json({
+      verified: true,
+      hash: hashToFind || match.signedHash || match.originalHash,
+      matchType:
+        hashToFind && match.signedHash === hashToFind
+          ? "FINAL_SIGNED_PDF"
+          : hashToFind && match.originalHash === hashToFind
+          ? "ORIGINAL_PDF"
+          : "REQUEST_ID",
+      request: {
+        id: match.id,
+        title: match.title,
+        projectName: match.projectName,
+        category: match.category,
+        status: match.status,
+        completedAt: match.completedAt,
+        originalHash: match.originalHash,
+        signedHash: match.signedHash,
+        signers: match.signers,
+      },
+    });
+  } catch (err) {
+    console.error("Verify GET error:", err);
+    return NextResponse.json({ error: "Verification failed." }, { status: 500 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const contentType = req.headers.get("content-type") || "";

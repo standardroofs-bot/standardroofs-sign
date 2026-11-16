@@ -142,6 +142,9 @@ model SignatureRequest {
   status               String       @default("PENDING") // PENDING | PARTIAL | COMPLETED | VOIDED
   signingOrder         String       @default("SEQUENTIAL") // SEQUENTIAL | PARALLEL
   requirePhotoLocation Boolean      @default(false)
+  isConfidential       Boolean      @default(false)
+  accessPasscode       String?
+  requiredAttachmentsJson String   @default("[]")
   originalPdfPath      String
   signedPdfPath        String?
   fileSizeBytes        Int          @default(0)
@@ -182,6 +185,9 @@ model Signer {
   locationLabel      String?
   locationAddress    String?
   locationCapturedAt DateTime?
+  accessPasscode     String?
+  passcodeVerifiedAt DateTime?
+  attachmentsJson    String           @default("[]")
   fieldValuesJson    String           @default("{}")
   auditEvents        AuditEvent[]
 }

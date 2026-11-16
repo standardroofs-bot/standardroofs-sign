@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import QRCode from "qrcode";
 import type { DocumentField } from "./types";
 
 export function normalizePdfBuffer(buffer: Buffer): Buffer {
@@ -32,6 +33,13 @@ export async function getPdfPageCount(buffer: Buffer): Promise<number> {
   }
 }
 
+export interface SignerAttachment {
+  id: string;
+  label: string;
+  name?: string;
+  dataUrl: string;
+}
+
 export interface SignerAuditInfo {
   id: string;
   role: string;
@@ -46,6 +54,8 @@ export interface SignerAuditInfo {
   longitude?: number | null;
   locationLabel?: string | null;
   locationAddress?: string | null;
+  passcodeVerified?: boolean;
+  attachments?: SignerAttachment[];
   fieldValues: Record<string, string>;
 }
 
@@ -60,6 +70,7 @@ export interface FinalizePdfInput {
   signers: SignerAuditInfo[];
   companyName: string;
   companyWebsite: string;
+  publicBaseUrl?: string;
 }
 
 function parseDataUrlImage(dataUrl: string): { mime: string; bytes: Uint8Array } | null {
@@ -245,6 +256,46 @@ export async function applySignaturesAndFinalizePdf(
   drawMetaRow("Completed At (UTC):", new Date().toISOString());
   drawMetaRow("Original SHA-256:", input.originalHash);
 
+  // Generate & embed live QR code for instant public audit verification
+  try {
+    const rawPublicUrl =
+      input.publicBaseUrl ||
+      (input.companyWebsite?.startsWith("http") ? input.companyWebsite : "http://localhost:3030");
+    const verifyUrl = `${rawPublicUrl.replace(/\/+$/, "")}/verify?id=${input.requestId}&hash=${input.originalHash}`;
+    const qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 160 });
+    const qrParsed = parseDataUrlImage(qrDataUrl);
+    if (qrParsed) {
+      const qrImg = await pdfDoc.embedPng(qrParsed.bytes);
+      const qrDim = 68;
+      const qrX = cw - 40 - qrDim;
+      const qrY = ch - 120 - 46;
+
+      certPage.drawImage(qrImg, {
+        x: qrX,
+        y: qrY,
+        width: qrDim,
+        height: qrDim,
+      });
+
+      certPage.drawText("SCAN TO VERIFY", {
+        x: qrX + 3,
+        y: qrY - 8,
+        size: 6.5,
+        font: helveticaBold,
+        color: rgb(0.1, 0.15, 0.25),
+      });
+      certPage.drawText("Tamper-Proof Audit", {
+        x: qrX + 2,
+        y: qrY - 16,
+        size: 5.5,
+        font: helvetica,
+        color: rgb(0.4, 0.45, 0.52),
+      });
+    }
+  } catch (err) {
+    console.warn("QR code embed exception:", err);
+  }
+
   y -= 14;
   certPage.drawLine({
     start: { x: 40, y },
@@ -266,7 +317,8 @@ export async function applySignaturesAndFinalizePdf(
   for (const signer of input.signers) {
     if (y < 130) break;
     const hasPhoto = Boolean(signer.photoDataUrl);
-    const boxH = hasPhoto ? 128 : signer.latitude != null ? 116 : 78;
+    const extraLines = (signer.passcodeVerified ? 12 : 0) + (signer.attachments?.length ? 12 : 0);
+    const boxH = (hasPhoto ? 132 : signer.latitude != null ? 120 : 84) + extraLines;
     certPage.drawRectangle({
       x: 40,
       y: y - boxH + 12,
@@ -381,6 +433,29 @@ export async function applySignaturesAndFinalizePdf(
       textY -= 12;
     }
 
+    if (signer.passcodeVerified) {
+      certPage.drawText("Confidential Access PIN: Authenticated (Signer Verified)", {
+        x: 52,
+        y: textY,
+        size: 7.5,
+        font: helveticaBold,
+        color: rgb(0.2, 0.4, 0.65),
+      });
+      textY -= 12;
+    }
+
+    if (signer.attachments && signer.attachments.length > 0) {
+      const attNames = signer.attachments.map((a) => a.label).join(", ");
+      certPage.drawText(`KYC ID Attachments: ${attNames.slice(0, 50)} (Attached as Annexure)`, {
+        x: 52,
+        y: textY,
+        size: 7.5,
+        font: helveticaBold,
+        color: rgb(0.12, 0.5, 0.28),
+      });
+      textY -= 12;
+    }
+
     if (signer.photoDataUrl) {
       const parsedPhoto = parseDataUrlImage(signer.photoDataUrl);
       if (parsedPhoto) {
@@ -438,6 +513,120 @@ export async function applySignaturesAndFinalizePdf(
       color: rgb(0.45, 0.5, 0.58),
     }
   );
+
+  // Append Annexure pages for each uploaded KYC document (PAN, Aadhaar, GST)
+  for (const signer of input.signers) {
+    if (!signer.attachments || signer.attachments.length === 0) continue;
+
+    for (const att of signer.attachments) {
+      if (!att.dataUrl) continue;
+      const parsed = parseDataUrlImage(att.dataUrl);
+      if (!parsed) continue;
+
+      try {
+        const embeddedImg =
+          parsed.mime === "image/png"
+            ? await pdfDoc.embedPng(parsed.bytes)
+            : await pdfDoc.embedJpg(parsed.bytes);
+
+        const annexPage = pdfDoc.addPage([595.28, 841.89]);
+        const aw = annexPage.getWidth();
+        const ah = annexPage.getHeight();
+
+        // Top banner
+        annexPage.drawRectangle({
+          x: 0,
+          y: ah - 60,
+          width: aw,
+          height: 60,
+          color: rgb(0.06, 0.09, 0.16),
+        });
+        annexPage.drawRectangle({
+          x: 0,
+          y: ah - 64,
+          width: aw,
+          height: 4,
+          color: rgb(0.76, 0.25, 0.05),
+        });
+
+        annexPage.drawText("ANNEXURE — SIGNER KYC ATTACHMENT", {
+          x: 40,
+          y: ah - 36,
+          size: 13,
+          font: helveticaBold,
+          color: rgb(1, 1, 1),
+        });
+
+        annexPage.drawText(
+          `Document: ${input.title}  |  Signer: ${signer.name} (${signer.role})`,
+          {
+            x: 40,
+            y: ah - 52,
+            size: 8.5,
+            font: helvetica,
+            color: rgb(0.85, 0.88, 0.92),
+          }
+        );
+
+        // Attachment Details Box
+        annexPage.drawRectangle({
+          x: 40,
+          y: ah - 115,
+          width: aw - 80,
+          height: 40,
+          color: rgb(0.96, 0.97, 0.99),
+          borderColor: rgb(0.85, 0.88, 0.93),
+          borderWidth: 1,
+        });
+
+        annexPage.drawText(`Attachment Type: ${att.label}`, {
+          x: 52,
+          y: ah - 92,
+          size: 9.5,
+          font: helveticaBold,
+          color: rgb(0.06, 0.09, 0.16),
+        });
+
+        annexPage.drawText(`Attached By: ${signer.name}  |  File: ${att.name || att.label}  |  Verified Electronic Copy`, {
+          x: 52,
+          y: ah - 106,
+          size: 8,
+          font: helvetica,
+          color: rgb(0.35, 0.4, 0.48),
+        });
+
+        // Compute aspect ratio to scale image cleanly inside remaining area
+        const maxImgW = aw - 80;
+        const maxImgH = ah - 160;
+        const imgDims = embeddedImg.scale(1);
+        const scale = Math.min(maxImgW / imgDims.width, maxImgH / imgDims.height, 1);
+        const drawW = imgDims.width * scale;
+        const drawH = imgDims.height * scale;
+        const drawX = 40 + (maxImgW - drawW) / 2;
+        const drawY = 40 + (maxImgH - drawH) / 2;
+
+        // Image background border
+        annexPage.drawRectangle({
+          x: drawX - 2,
+          y: drawY - 2,
+          width: drawW + 4,
+          height: drawH + 4,
+          color: rgb(1, 1, 1),
+          borderColor: rgb(0.8, 0.83, 0.88),
+          borderWidth: 1,
+        });
+
+        annexPage.drawImage(embeddedImg, {
+          x: drawX,
+          y: drawY,
+          width: drawW,
+          height: drawH,
+        });
+      } catch (err) {
+        console.warn("Failed to embed attachment annexure image:", err);
+      }
+    }
+  }
 
   const bytes = await pdfDoc.save();
   return Buffer.from(bytes);
