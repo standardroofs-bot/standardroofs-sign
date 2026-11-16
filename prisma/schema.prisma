@@ -33,6 +33,13 @@ model Organization {
   razorpayCustomerId     String?
   razorpaySubscriptionId String?
 
+  // Customer Account Lifecycle & Isolation
+  status                 String             @default("ACTIVE") // ACTIVE | SUSPENDED | CANCELLED
+  isEnterpriseDedicated  Boolean            @default(false)    // If true, routes to isolated private storage/DB
+  customDatabaseUrl      String             @default("")       // Dedicated private database connection string
+  customStorageBucket    String             @default("")       // Dedicated private S3/R2 bucket
+  adminNotes             String             @default("")       // Internal notes by Super Admin
+
   // Legacy fallback compatibility fields
   plan                   String             @default("STARTER_10GB")
   storageQuotaBytes      BigInt             @default(10737418240)
@@ -63,7 +70,7 @@ model User {
   name         String
   email        String             @unique
   passwordHash String
-  role         String             @default("STAFF") // ADMIN | STAFF
+  role         String             @default("STAFF") // SUPER_ADMIN | ADMIN | STAFF
   title        String             @default("Member")
   activeOrgId  String?
   createdAt    DateTime           @default(now())

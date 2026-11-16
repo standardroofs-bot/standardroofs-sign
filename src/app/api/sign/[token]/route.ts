@@ -37,6 +37,13 @@ export async function GET(
     return NextResponse.json({ error: "Invalid or expired signing link." }, { status: 404 });
   }
 
+  if (signer.request.organization?.status === "SUSPENDED") {
+    return NextResponse.json(
+      { error: "This document's issuing organization is temporarily unavailable. Please contact the sender." },
+      { status: 403 }
+    );
+  }
+
   const settings = await prisma.companySettings.findUnique({
     where: { id: "default" },
   });
@@ -137,6 +144,13 @@ export async function POST(
 
   if (signer.request.status === "DECLINED") {
     return NextResponse.json({ error: "This request has been declined." }, { status: 400 });
+  }
+
+  if (signer.request.organization?.status === "SUSPENDED") {
+    return NextResponse.json(
+      { error: "This document's issuing organization is temporarily unavailable. Please contact the sender." },
+      { status: 403 }
+    );
   }
 
   if (signer.request.expiresAt && new Date() > signer.request.expiresAt) {

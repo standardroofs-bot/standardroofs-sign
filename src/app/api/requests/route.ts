@@ -69,6 +69,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Organization not found." }, { status: 404 });
     }
 
+    if (org.status === "SUSPENDED") {
+      return NextResponse.json(
+        { error: "Your workspace has been suspended. Please contact platform administration to restore access." },
+        { status: 403 }
+      );
+    }
+
     const mode = body.mode === "BULK" ? "BULK" : "SINGLE";
     const requestsToCreateCount = mode === "BULK" && Array.isArray(body.bulkRecipients)
       ? Math.max(1, body.bulkRecipients.length)

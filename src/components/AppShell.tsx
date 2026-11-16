@@ -17,6 +17,7 @@ import {
   Building2,
   Plus,
   ChevronDown,
+  Sparkles,
 } from "lucide-react";
 
 interface NotificationEvent {
@@ -186,6 +187,21 @@ export default function AppShell({ user, children }: AppShellProps) {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* Platform Super Admin Badge & Link */}
+            {user.role === "SUPER_ADMIN" && (
+              <Link
+                href="/admin"
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  pathname.startsWith("/admin")
+                    ? "bg-amber-500 text-slate-900 border border-amber-600 shadow-xs"
+                    : "bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-700" />
+                <span>Super Admin</span>
+              </Link>
             )}
 
             <nav className="hidden lg:flex items-center gap-1">
