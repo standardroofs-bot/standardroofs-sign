@@ -240,6 +240,7 @@ export async function POST(req: Request) {
           projectName: created.projectName,
           message: created.message,
           signUrl,
+          organization: org,
         });
 
         createdRequests.push({
@@ -359,6 +360,7 @@ export async function POST(req: Request) {
         projectName: created.projectName,
         message: created.message,
         signUrl,
+        organization: org,
       });
 
       if (dispatch.email.sent || dispatch.whatsapp.autoSent || dispatch.sms.autoSent) {

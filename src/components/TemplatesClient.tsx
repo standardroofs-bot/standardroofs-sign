@@ -211,14 +211,14 @@ export default function TemplatesClient({
           </button>
         </form>
 
-        {/* Quick Starter Roofing Templates */}
+        {/* Quick Starter Templates */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-xs">
           <div className="flex items-center gap-2 font-semibold text-slate-900">
             <Sparkles className="w-5 h-5 text-orange-700" />
-            <span>Quick-Start Standard Roofs Templates</span>
+            <span>Quick-Start Contract Templates</span>
           </div>
           <p className="text-xs text-slate-500">
-            Need to test or start right away? Generate a ready-made Standard Roofs PDF with pre-placed signature boxes.
+            Need to test or start right away? Generate a ready-made commercial agreement PDF with pre-placed signature boxes.
           </p>
 
           <div className="space-y-2.5">

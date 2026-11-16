@@ -181,7 +181,7 @@ export default function DashboardClient({
         <div>
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-50 text-red-900 border border-red-200 text-xs font-semibold mb-2">
             <InfinityIcon className="w-3.5 h-3.5" />
-            Unlimited Submissions • Standard Roofs Sign
+            Enterprise Tier • Standard e-Sign
           </div>
           <h1 className="text-2xl font-bold text-slate-900">
             Document Records &amp; Submissions

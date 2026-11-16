@@ -12,6 +12,21 @@ export interface DispatchTarget {
   projectName: string;
   message: string;
   signUrl: string;
+  organizationId?: string;
+  organization?: {
+    name?: string;
+    website?: string;
+    accentColor?: string;
+    smtpHost?: string;
+    smtpPort?: number;
+    smtpUser?: string;
+    smtpPass?: string;
+    smtpFrom?: string;
+    whatsappApiToken?: string;
+    whatsappPhoneNumberId?: string;
+    whatsappWebhookUrl?: string;
+    fast2smsApiKey?: string;
+  } | null;
 }
 
 export interface DispatchResult {
@@ -48,28 +63,31 @@ export function buildSmsDeepLink(phone: string, text: string): string {
   return `sms:${cleanPhone}?body=${encodeURIComponent(text)}`;
 }
 
-async function getSmtpTransport() {
+export async function dispatchInvite(
+  target: DispatchTarget
+): Promise<DispatchResult> {
   const settings = await prisma.companySettings.findUnique({
     where: { id: "default" },
   });
 
-  const host = settings?.smtpHost || process.env.SMTP_HOST || "";
-  const port = settings?.smtpPort || Number(process.env.SMTP_PORT || 587);
-  const user = settings?.smtpUser || process.env.SMTP_USER || "";
-  const pass = settings?.smtpPass || process.env.SMTP_PASS || "";
+  const org =
+    target.organization ||
+    (target.organizationId
+      ? await prisma.organization.findUnique({ where: { id: target.organizationId } })
+      : null);
+
+  const companyName = org?.name || settings?.companyName || "Standard e-Sign";
+  const accentColor = org?.accentColor || settings?.accentColor || "#991B1B";
+  const host = org?.smtpHost || settings?.smtpHost || process.env.SMTP_HOST || "";
+  const port = org?.smtpPort || settings?.smtpPort || Number(process.env.SMTP_PORT || 587);
+  const user = org?.smtpUser || settings?.smtpUser || process.env.SMTP_USER || "";
+  const pass = org?.smtpPass || settings?.smtpPass || process.env.SMTP_PASS || "";
   const from =
+    org?.smtpFrom ||
     settings?.smtpFrom ||
     process.env.SMTP_FROM ||
-    `${settings?.companyName || "Standard e-Sign"} <noreply@standardesign.in>`;
+    `${companyName} <noreply@standardesign.in>`;
 
-  return { settings, host, port, user, pass, from };
-}
-
-export async function dispatchInvite(
-  target: DispatchTarget
-): Promise<DispatchResult> {
-  const { settings, host, port, user, pass, from } = await getSmtpTransport();
-  const companyName = settings?.companyName || "Standard e-Sign";
   const textBody = buildShortMessage({
     signerName: target.name,
     companyName,
@@ -89,7 +107,7 @@ export async function dispatchInvite(
     },
   };
 
-  // 1. EMAIL DISPATCH (Custom SMTP)
+  // 1. EMAIL DISPATCH (Custom Org SMTP or Platform Fallback)
   if (target.channels.includes("EMAIL") && target.email) {
     if (host && user && pass) {
       try {
@@ -105,7 +123,7 @@ export async function dispatchInvite(
           subject: `Signature Requested: ${target.documentTitle} (${companyName})`,
           html: `
             <div style="font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
-              <div style="background:#0f172a;padding:20px 24px;border-bottom:4px solid #991b1b;">
+              <div style="background:#0f172a;padding:20px 24px;border-bottom:4px solid ${accentColor};">
                 <h1 style="margin:0;color:#ffffff;font-size:20px;">${companyName}</h1>
                 <p style="margin:4px 0 0;color:#cbd5e1;font-size:13px;">Electronic Signature Request</p>
               </div>
@@ -114,7 +132,7 @@ export async function dispatchInvite(
                 <p>Please review and sign: <strong>${target.documentTitle}</strong></p>
                 ${target.message ? `<p style="color:#475569;font-size:14px;background:#f8fafc;padding:12px;border-radius:8px;">${target.message}</p>` : ""}
                 <div style="margin:24px 0;">
-                  <a href="${target.signUrl}" style="display:inline-block;background:#991b1b;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 24px;border-radius:8px;">
+                  <a href="${target.signUrl}" style="display:inline-block;background:${accentColor};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 24px;border-radius:8px;">
                     Review &amp; Sign Document
                   </a>
                 </div>
@@ -134,10 +152,15 @@ export async function dispatchInvite(
     }
   }
 
-  // 2. WHATSAPP AUTOMATED DISPATCH (Meta Cloud API / AiSensy / Webhook)
+  // 2. WHATSAPP AUTOMATED DISPATCH (Meta Cloud API / Webhook)
   if (target.channels.includes("WHATSAPP") && target.phone) {
-    const waToken = process.env.WHATSAPP_API_TOKEN || process.env.WHATSAPP_CLOUD_API_TOKEN;
-    const waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const waToken =
+      org?.whatsappApiToken ||
+      process.env.WHATSAPP_API_TOKEN ||
+      process.env.WHATSAPP_CLOUD_API_TOKEN;
+    const waPhoneId =
+      org?.whatsappPhoneNumberId ||
+      process.env.WHATSAPP_PHONE_NUMBER_ID;
     const cleanDigits = normalizeWhatsAppDigits(target.phone);
 
     // 2A. Meta WhatsApp Cloud API
@@ -167,10 +190,11 @@ export async function dispatchInvite(
       } catch (err) {
         result.whatsapp.reason = err instanceof Error ? err.message : "WhatsApp Cloud API error";
       }
-    } else if (settings?.whatsappWebhookUrl) {
+    } else if (org?.whatsappWebhookUrl || settings?.whatsappWebhookUrl) {
       // 2B. Generic Webhook (e.g. AiSensy / Wati)
+      const hookUrl = org?.whatsappWebhookUrl || settings?.whatsappWebhookUrl || "";
       try {
-        const resp = await fetch(settings.whatsappWebhookUrl, {
+        const resp = await fetch(hookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -194,6 +218,7 @@ export async function dispatchInvite(
     const clean10 = target.phone.replace(/\D/g, "").slice(-10);
     const msg91Auth = process.env.MSG91_AUTH_KEY;
     const msg91Template = process.env.MSG91_TEMPLATE_ID;
+    const fast2smsKey = org?.fast2smsApiKey || settings?.fast2smsApiKey;
 
     // 3A. MSG91 Flow API
     if (msg91Auth && msg91Template && clean10.length === 10) {
@@ -220,13 +245,13 @@ export async function dispatchInvite(
       } catch (err) {
         result.sms.reason = err instanceof Error ? err.message : "MSG91 dispatch error";
       }
-    } else if (settings?.fast2smsApiKey && clean10.length === 10) {
+    } else if (fast2smsKey && clean10.length === 10) {
       // 3B. Fast2SMS API
       try {
         const resp = await fetch("https://www.fast2sms.com/dev/bulkV2", {
           method: "POST",
           headers: {
-            authorization: settings.fast2smsApiKey,
+            authorization: fast2smsKey,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -250,11 +275,35 @@ export async function sendCompletedCopiesEmail(params: {
   projectName: string;
   recipients: { name: string; email: string }[];
   pdfBuffer: Buffer;
+  organization?: {
+    name?: string;
+    accentColor?: string;
+    smtpHost?: string;
+    smtpPort?: number;
+    smtpUser?: string;
+    smtpPass?: string;
+    smtpFrom?: string;
+  } | null;
 }): Promise<void> {
-  const { settings, host, port, user, pass, from } = await getSmtpTransport();
+  const settings = await prisma.companySettings.findUnique({
+    where: { id: "default" },
+  });
+
+  const org = params.organization;
+  const companyName = org?.name || settings?.companyName || "Standard e-Sign";
+  const accentColor = org?.accentColor || settings?.accentColor || "#16a34a";
+  const host = org?.smtpHost || settings?.smtpHost || process.env.SMTP_HOST || "";
+  const port = org?.smtpPort || settings?.smtpPort || Number(process.env.SMTP_PORT || 587);
+  const user = org?.smtpUser || settings?.smtpUser || process.env.SMTP_USER || "";
+  const pass = org?.smtpPass || settings?.smtpPass || process.env.SMTP_PASS || "";
+  const from =
+    org?.smtpFrom ||
+    settings?.smtpFrom ||
+    process.env.SMTP_FROM ||
+    `${companyName} <noreply@standardesign.in>`;
+
   if (!host || !user || !pass) return;
 
-  const companyName = settings?.companyName || "Standard e-Sign";
   const transporter = nodemailer.createTransport({
     host,
     port,
@@ -273,7 +322,7 @@ export async function sendCompletedCopiesEmail(params: {
         subject: `Completed Copy: ${params.documentTitle} (Signed & Sealed)`,
         html: `
           <div style="font-family:Segoe UI,Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
-            <div style="background:#0f172a;padding:20px 24px;border-bottom:4px solid #16a34a;">
+            <div style="background:#0f172a;padding:20px 24px;border-bottom:4px solid ${accentColor};">
               <h1 style="margin:0;color:#ffffff;font-size:20px;">${companyName}</h1>
               <p style="margin:4px 0 0;color:#86efac;font-size:13px;">Document Execution Completed</p>
             </div>

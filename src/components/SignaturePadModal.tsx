@@ -114,7 +114,7 @@ export default function SignaturePadModal({
       ctx.font = "bold 26px Segoe UI, Arial, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(text || "STANDARD ROOFS", c.width / 2, c.height / 2);
+      ctx.fillText(text || "OFFICIAL SEAL", c.width / 2, c.height / 2);
     } else {
       ctx.fillStyle = "#0f172a";
       ctx.font = "italic 48px Georgia, 'Times New Roman', serif";

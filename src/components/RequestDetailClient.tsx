@@ -26,6 +26,7 @@ interface RequestDetailProps {
     title: string;
     projectName: string;
     category: string;
+    organization?: { name: string } | null;
     message: string;
     status: string;
     signingOrder: string;
@@ -159,7 +160,8 @@ export default function RequestDetailClient({
     signer: RequestDetailProps["request"]["signers"][number]
   ) {
     const signUrl = getSignUrl(signer.token);
-    return `Hello ${signer.name},\n\nStandard Roofs has sent you "${request.title}"${
+    const orgName = (request as any).organization?.name || "Our Organization";
+    return `Hello ${signer.name},\n\n${orgName} has sent you "${request.title}"${
       request.projectName ? ` (${request.projectName})` : ""
     } for electronic signature.\n\nReview & Sign here:\n${signUrl}`;
   }

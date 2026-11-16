@@ -277,7 +277,7 @@ export default function SignDocumentPage({
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="flex items-center gap-2 text-slate-600 text-sm font-medium">
           <Loader2 className="w-5 h-5 animate-spin text-orange-700" />
-          Loading Standard Roofs document...
+          Loading document...
         </div>
       </div>
     );
@@ -524,7 +524,7 @@ export default function SignDocumentPage({
                 </h3>
                 <p className="text-xs text-emerald-800 mt-0.5">
                   {isCompleted
-                    ? "All parties have signed. You can download the final PDF with the Standard Roofs Audit Certificate."
+                    ? "All parties have signed. You can download the final PDF with the Certificate of Completion & Section 65B Audit Trail."
                     : "Your signed copy is ready to download below. Waiting for the remaining signer(s) to counter-sign."}
                 </p>
               </div>

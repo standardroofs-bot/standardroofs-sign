@@ -1029,7 +1029,7 @@ export default function PhotoLocationCapture({
               </label>
               <input
                 type="text"
-                placeholder="e.g. Standard Roofs Works, Shed #3"
+                placeholder="e.g. Head Office, Floor 3 or Site Landmark"
                 value={locationLabel}
                 onChange={(e) =>
                   onChange({

@@ -436,6 +436,7 @@ export async function POST(
       projectName: signer.request.projectName,
       message: signer.request.message,
       signUrl: `${baseUrl}/s/${nextWaiting.token}`,
+      organization: signer.request.organization,
     });
   } else if (!allSigned) {
     await prisma.signatureRequest.update({
@@ -475,7 +476,7 @@ export async function POST(
       fieldValues: JSON.parse(s.fieldValuesJson || "{}"),
     })),
     companyName: signer.request.organization?.name || settings?.companyName || "Standard e-Sign",
-    companyWebsite: signer.request.organization?.website || settings?.website || "https://www.standardroofs.in",
+    companyWebsite: signer.request.organization?.website || settings?.website || "https://www.standardesign.in",
     publicBaseUrl: signer.request.organization?.publicBaseUrl || settings?.publicBaseUrl || "",
   });
 
@@ -509,6 +510,7 @@ export async function POST(
       projectName: signer.request.projectName || "",
       recipients: updatedSigners.map((s) => ({ name: s.name, email: s.email })),
       pdfBuffer: finalizedBuffer,
+      organization: signer.request.organization,
     }).catch(() => {});
   } else {
     await prisma.signatureRequest.update({

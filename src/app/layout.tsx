@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "StandardRoofs Sign | E-Signature & Fabrication Approvals",
+  title: "Standard e-Sign | Enterprise Digital Signatures & Section 65B Audit Trail",
   description:
-    "Unlimited self-hosted e-signature platform for Standard Roofs quotations, fabrication drawings, work orders, and handover certificates.",
+    "Enterprise-grade digital signature and document workflow platform with Aadhaar/PAN KYC, Section 65B court-admissible audit certificates, and biometric geo-verification.",
 };
 
 export default function RootLayout({

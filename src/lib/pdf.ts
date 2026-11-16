@@ -250,7 +250,7 @@ export async function applySignaturesAndFinalizePdf(
   };
 
   drawMetaRow("Document Title:", input.title);
-  drawMetaRow("Project Name:", input.projectName || "Standard Roofs Project");
+  drawMetaRow("Project Name:", input.projectName || "General Agreement");
   drawMetaRow("Category:", input.categoryLabel);
   drawMetaRow("Request ID:", input.requestId);
   drawMetaRow("Completed At (UTC):", new Date().toISOString());

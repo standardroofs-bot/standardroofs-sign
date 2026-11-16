@@ -9,18 +9,65 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Active Organization or default settings
+  const org = user.activeOrg
+    ? await prisma.organization.findUnique({ where: { id: user.activeOrg.id } })
+    : null;
   const settings = await prisma.companySettings.findUnique({
     where: { id: "default" },
   });
-  const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, role: true, title: true, createdAt: true },
-    orderBy: { createdAt: "asc" },
-  });
+
+  // Get users belonging to active organization
+  let users: Array<{
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    title: string;
+    createdAt: Date;
+  }> = [];
+
+  if (user.activeOrg?.id) {
+    const memberships = await prisma.membership.findMany({
+      where: { organizationId: user.activeOrg.id },
+      include: {
+        user: { select: { id: true, name: true, email: true, role: true, title: true, createdAt: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    users = memberships.map((m) => ({
+      ...m.user,
+      role: m.role,
+    }));
+  } else {
+    users = await prisma.user.findMany({
+      select: { id: true, name: true, email: true, role: true, title: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  const combinedSettings = {
+    companyName: org?.name || settings?.companyName || "Standard e-Sign",
+    tagline: org?.tagline || settings?.tagline || "Document Signing & Approvals",
+    website: org?.website || settings?.website || "https://www.standardesign.in",
+    email: org?.email || settings?.email || "",
+    phone: org?.phone || settings?.phone || "",
+    address: org?.address || settings?.address || "",
+    accentColor: org?.accentColor || settings?.accentColor || "#991B1B",
+    publicBaseUrl: org?.publicBaseUrl || settings?.publicBaseUrl || "",
+    smtpHost: org?.smtpHost || settings?.smtpHost || "",
+    smtpPort: org?.smtpPort || settings?.smtpPort || 587,
+    smtpUser: org?.smtpUser || settings?.smtpUser || "",
+    smtpPass: (org?.smtpPass || settings?.smtpPass) ? "••••••••" : "",
+    smtpFrom: org?.smtpFrom || settings?.smtpFrom || "",
+    whatsappWebhookUrl: org?.whatsappWebhookUrl || settings?.whatsappWebhookUrl || "",
+    smsWebhookUrl: org?.smsWebhookUrl || settings?.smsWebhookUrl || "",
+    fast2smsApiKey: org?.fast2smsApiKey || settings?.fast2smsApiKey || "",
+    googleMapsApiKey: settings?.googleMapsApiKey || "",
+  };
 
   return NextResponse.json({
-    settings: settings
-      ? { ...settings, smtpPass: settings.smtpPass ? "••••••••" : "" }
-      : null,
+    settings: combinedSettings,
     users,
   });
 }
@@ -34,13 +81,30 @@ export async function PATCH(req: Request) {
   const body = await req.json();
 
   if (body.action === "add_user") {
-    if (user.role !== "ADMIN") {
-      return NextResponse.json({ error: "Admin role required" }, { status: 403 });
+    const activeMembership = user.activeOrg
+      ? await prisma.membership.findUnique({
+          where: {
+            userId_organizationId: {
+              userId: user.id,
+              organizationId: user.activeOrg.id,
+            },
+          },
+        })
+      : null;
+
+    const isAdmin =
+      user.role === "ADMIN" ||
+      activeMembership?.role === "OWNER" ||
+      activeMembership?.role === "ADMIN";
+
+    if (!isAdmin) {
+      return NextResponse.json({ error: "Admin role required to add team members." }, { status: 403 });
     }
+
     const name = String(body.name || "").trim();
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
-    const title = String(body.title || "Project Engineer").trim();
+    const title = String(body.title || "Team Member").trim();
     const role = body.role === "ADMIN" ? "ADMIN" : "STAFF";
 
     if (!name || !email || password.length < 6) {
@@ -50,64 +114,129 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return NextResponse.json(
-        { error: "User with this email already exists." },
-        { status: 409 }
-      );
+    let existingUser = await prisma.user.findUnique({ where: { email } });
+
+    if (!existingUser) {
+      const passwordHash = await bcrypt.hash(password, 10);
+      existingUser = await prisma.user.create({
+        data: {
+          name,
+          email,
+          passwordHash,
+          role,
+          title,
+          activeOrgId: user.activeOrg?.id || null,
+        },
+      });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const created = await prisma.user.create({
-      data: { name, email, passwordHash, role, title },
-      select: { id: true, name: true, email: true, role: true, title: true, createdAt: true },
-    });
-    return NextResponse.json({ user: created }, { status: 201 });
+    if (user.activeOrg?.id) {
+      const existingMembership = await prisma.membership.findUnique({
+        where: {
+          userId_organizationId: {
+            userId: existingUser.id,
+            organizationId: user.activeOrg.id,
+          },
+        },
+      });
+
+      if (existingMembership) {
+        return NextResponse.json(
+          { error: "This user is already a member of your organization." },
+          { status: 409 }
+        );
+      }
+
+      await prisma.membership.create({
+        data: {
+          userId: existingUser.id,
+          organizationId: user.activeOrg.id,
+          role: role === "ADMIN" ? "ADMIN" : "MEMBER",
+        },
+      });
+    }
+
+    return NextResponse.json(
+      {
+        user: {
+          id: existingUser.id,
+          name: existingUser.name,
+          email: existingUser.email,
+          role,
+          title: existingUser.title,
+          createdAt: existingUser.createdAt,
+        },
+      },
+      { status: 201 }
+    );
   }
 
-  const updateData: Record<string, string | number> = {
-    companyName: String(body.companyName || "Standard Roofs").trim(),
-    tagline: String(body.tagline || "Document Signing & Approvals").trim(),
-    website: String(body.website || "https://www.standardroofs.in").trim(),
-    email: String(body.email || "info@standardroofs.in").trim(),
-    phone: String(body.phone || "+91-86084-75787").trim(),
-    address: String(body.address || "Erode, Tamil Nadu, India").trim(),
-    publicBaseUrl: String(body.publicBaseUrl || "").trim().replace(/\/+$/, ""),
-    smtpHost: String(body.smtpHost || "").trim(),
-    smtpPort: Number(body.smtpPort || 587),
-    smtpUser: String(body.smtpUser || "").trim(),
-    smtpFrom: String(body.smtpFrom || "Standard Roofs <info@standardroofs.in>").trim(),
-    whatsappWebhookUrl: String(body.whatsappWebhookUrl || "").trim(),
-    smsWebhookUrl: String(body.smsWebhookUrl || "").trim(),
-    fast2smsApiKey: String(body.fast2smsApiKey || "").trim(),
-    googleMapsApiKey: String(body.googleMapsApiKey || "").trim(),
-  };
+  const companyName = String(body.companyName || "").trim();
+  const tagline = String(body.tagline || "").trim();
+  const website = String(body.website || "").trim();
+  const email = String(body.email || "").trim();
+  const phone = String(body.phone || "").trim();
+  const address = String(body.address || "").trim();
+  const publicBaseUrl = String(body.publicBaseUrl || "").trim().replace(/\/+$/, "");
+  const smtpHost = String(body.smtpHost || "").trim();
+  const smtpPort = Number(body.smtpPort || 587);
+  const smtpUser = String(body.smtpUser || "").trim();
+  const smtpFrom = String(body.smtpFrom || "").trim();
+  const whatsappWebhookUrl = String(body.whatsappWebhookUrl || "").trim();
+  const smsWebhookUrl = String(body.smsWebhookUrl || "").trim();
+  const fast2smsApiKey = String(body.fast2smsApiKey || "").trim();
+  const googleMapsApiKey = String(body.googleMapsApiKey || "").trim();
+
+  const orgUpdate: Record<string, any> = {};
+  if (companyName) orgUpdate.name = companyName;
+  if (tagline !== undefined) orgUpdate.tagline = tagline;
+  if (website !== undefined) orgUpdate.website = website;
+  if (email !== undefined) orgUpdate.email = email;
+  if (phone !== undefined) orgUpdate.phone = phone;
+  if (address !== undefined) orgUpdate.address = address;
+  if (publicBaseUrl !== undefined) orgUpdate.publicBaseUrl = publicBaseUrl;
+  if (smtpHost !== undefined) orgUpdate.smtpHost = smtpHost;
+  if (smtpPort !== undefined) orgUpdate.smtpPort = smtpPort;
+  if (smtpUser !== undefined) orgUpdate.smtpUser = smtpUser;
+  if (smtpFrom !== undefined) orgUpdate.smtpFrom = smtpFrom;
+  if (whatsappWebhookUrl !== undefined) orgUpdate.whatsappWebhookUrl = whatsappWebhookUrl;
+  if (smsWebhookUrl !== undefined) orgUpdate.smsWebhookUrl = smsWebhookUrl;
+  if (fast2smsApiKey !== undefined) orgUpdate.fast2smsApiKey = fast2smsApiKey;
 
   if (body.smtpPass && body.smtpPass !== "••••••••") {
-    updateData.smtpPass = String(body.smtpPass);
+    orgUpdate.smtpPass = String(body.smtpPass);
   }
-
-  const updated = await prisma.companySettings.upsert({
-    where: { id: "default" },
-    update: updateData,
-    create: {
-      id: "default",
-      ...updateData,
-    },
-  });
 
   if (user.activeOrg?.id) {
     await prisma.organization.update({
       where: { id: user.activeOrg.id },
-      data: {
-        publicBaseUrl: updateData.publicBaseUrl as string,
-      },
-    }).catch(() => {});
+      data: orgUpdate,
+    });
   }
 
+  // Also sync global settings for fallback or single-tenant default
+  const settingsUpdate: Record<string, any> = {
+    ...orgUpdate,
+    ...(companyName ? { companyName } : {}),
+    ...(googleMapsApiKey !== undefined ? { googleMapsApiKey } : {}),
+  };
+  delete settingsUpdate.name;
+
+  await prisma.companySettings.upsert({
+    where: { id: "default" },
+    update: settingsUpdate,
+    create: {
+      id: "default",
+      companyName: companyName || "Standard e-Sign",
+      ...settingsUpdate,
+    },
+  });
+
   return NextResponse.json({
-    settings: { ...updated, smtpPass: updated.smtpPass ? "••••••••" : "" },
+    settings: {
+      ...orgUpdate,
+      companyName: companyName || user.activeOrg?.name || "Standard e-Sign",
+      smtpPass: orgUpdate.smtpPass ? "••••••••" : "",
+    },
   });
 }
-

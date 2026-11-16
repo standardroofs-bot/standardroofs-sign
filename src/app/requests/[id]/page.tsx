@@ -21,6 +21,7 @@ export default async function RequestDetailPage({
     prisma.signatureRequest.findUnique({
       where: { id },
       include: {
+        organization: true,
         signers: { orderBy: { orderIndex: "asc" } },
         auditEvents: { orderBy: { createdAt: "desc" } },
       },
@@ -41,6 +42,7 @@ export default async function RequestDetailPage({
           title: req.title,
           projectName: req.projectName,
           category: req.category,
+          organization: req.organization ? { name: req.organization.name } : null,
           message: req.message,
           status: req.status,
           signingOrder: req.signingOrder,
