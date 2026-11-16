@@ -92,6 +92,7 @@ export default function NewRequestClient({
   const [accessPasscode, setAccessPasscode] = useState("");
   const [requireAttachments, setRequireAttachments] = useState(false);
   const [selectedAttachments, setSelectedAttachments] = useState<string[]>([]);
+  const [expiryDays, setExpiryDays] = useState<number>(14);
   const [signers, setSigners] = useState<SignerDraft[]>([]);
   const [bulkText, setBulkText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -182,6 +183,7 @@ export default function NewRequestClient({
           requirePhotoLocation,
           isConfidential,
           accessPasscode: isConfidential ? accessPasscode.trim() : null,
+          expiryDays,
           requiredAttachments: requireAttachments
             ? selectedAttachments.map((id) => {
                 const found = AVAILABLE_ATTACHMENTS.find((a) => a.id === id);
@@ -642,6 +644,25 @@ export default function NewRequestClient({
                 })}
               </div>
             )}
+          </div>
+
+          {/* Expiration Settings */}
+          <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-semibold text-slate-800">Signing Deadline / Expiration</span>
+              <p className="text-[11px] text-slate-500">Document automatically voids after this period.</p>
+            </div>
+            <select
+              value={expiryDays}
+              onChange={(e) => setExpiryDays(Number(e.target.value))}
+              className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white font-medium"
+            >
+              <option value={3}>3 Days</option>
+              <option value={7}>7 Days (1 Week)</option>
+              <option value={14}>14 Days (2 Weeks)</option>
+              <option value={30}>30 Days (1 Month)</option>
+              <option value={60}>60 Days</option>
+            </select>
           </div>
         </div>
 

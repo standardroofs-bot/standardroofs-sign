@@ -139,7 +139,8 @@ model SignatureRequest {
   projectName          String       @default("")
   category             String       @default("QUOTATION_BOQ")
   message              String       @default("")
-  status               String       @default("PENDING") // PENDING | PARTIAL | COMPLETED | VOIDED
+  status               String       @default("PENDING") // PENDING | PARTIAL | COMPLETED | VOIDED | DECLINED | EXPIRED
+  declinedReason       String?
   signingOrder         String       @default("SEQUENTIAL") // SEQUENTIAL | PARALLEL
   requirePhotoLocation Boolean      @default(false)
   isConfidential       Boolean      @default(false)
@@ -188,6 +189,9 @@ model Signer {
   accessPasscode     String?
   passcodeVerifiedAt DateTime?
   attachmentsJson    String           @default("[]")
+  declinedReason     String?
+  declinedAt         DateTime?
+  reassignedReason   String?
   fieldValuesJson    String           @default("{}")
   auditEvents        AuditEvent[]
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { readPdfBuffer, savePdfBuffer } from "@/lib/storage";
+import { readPdfBuffer, savePdfBuffer, generateSecureToken } from "@/lib/storage";
 import { applySignaturesAndFinalizePdf } from "@/lib/pdf";
 import { dispatchInvite, sendCompletedCopiesEmail } from "@/lib/dispatch";
 import { reverseGeocode } from "@/lib/geocode";
@@ -83,6 +83,7 @@ export async function GET(
       status: signer.status,
       signedAt: signer.signedAt,
       passcodeVerified: isPasscodeVerified,
+      declinedReason: signer.declinedReason,
     },
     request: {
       id: signer.request.id,
@@ -91,6 +92,9 @@ export async function GET(
       category: signer.request.category,
       message: signer.request.message,
       status: signer.request.status,
+      declinedReason: signer.request.declinedReason,
+      expiresAt: signer.request.expiresAt,
+      isExpired: signer.request.expiresAt ? new Date() > signer.request.expiresAt : false,
       requirePhotoLocation: signer.request.requirePhotoLocation,
       isConfidential: signer.request.isConfidential,
       requiresPasscode,
@@ -131,6 +135,14 @@ export async function POST(
     return NextResponse.json({ error: "This request has been voided." }, { status: 400 });
   }
 
+  if (signer.request.status === "DECLINED") {
+    return NextResponse.json({ error: "This request has been declined." }, { status: 400 });
+  }
+
+  if (signer.request.expiresAt && new Date() > signer.request.expiresAt) {
+    return NextResponse.json({ error: "This document has expired and can no longer be signed." }, { status: 400 });
+  }
+
   if (signer.status === "WAITING") {
     return NextResponse.json(
       { error: "Waiting for an earlier signer to complete first." },
@@ -146,6 +158,112 @@ export async function POST(
   }
 
   const body = await req.json();
+
+  // Action: Decline to Sign with mandatory reason
+  if (body.action === "DECLINE_SIGNING") {
+    const reason = String(body.reason || "Declined by signer").trim();
+    const ip = getClientIp(req);
+    const ua = req.headers.get("user-agent") || "";
+    const now = new Date();
+
+    await prisma.signer.update({
+      where: { id: signer.id },
+      data: {
+        status: "DECLINED",
+        declinedReason: reason,
+        declinedAt: now,
+      },
+    });
+
+    await prisma.signatureRequest.update({
+      where: { id: signer.requestId },
+      data: {
+        status: "DECLINED",
+        declinedReason: `${signer.name} (${signer.role}) declined: ${reason}`,
+      },
+    });
+
+    await prisma.auditEvent.create({
+      data: {
+        requestId: signer.requestId,
+        signerId: signer.id,
+        action: "VOIDED",
+        details: `${signer.name} (${signer.role}) declined to sign. Reason: ${reason}`,
+        ipAddress: ip,
+        userAgent: ua,
+      },
+    });
+
+    return NextResponse.json({ success: true, status: "DECLINED" });
+  }
+
+  // Action: Reassign / Delegate signing responsibility
+  if (body.action === "REASSIGN_SIGNER") {
+    const newName = String(body.name || "").trim();
+    const newEmail = String(body.email || "").trim().toLowerCase();
+    const newPhone = String(body.phone || "").trim();
+    const reason = String(body.reason || "Delegated to another authorized signatory").trim();
+
+    if (!newName || (!newEmail && !newPhone)) {
+      return NextResponse.json(
+        { error: "Please enter Name and either Email or Phone for the new signer." },
+        { status: 400 }
+      );
+    }
+
+    const ip = getClientIp(req);
+    const ua = req.headers.get("user-agent") || "";
+    const oldName = signer.name;
+    const newToken = generateSecureToken();
+
+    await prisma.signer.update({
+      where: { id: signer.id },
+      data: {
+        name: newName,
+        email: newEmail,
+        phone: newPhone,
+        token: newToken,
+        status: "PENDING",
+        reassignedReason: `Reassigned from ${oldName}. Reason: ${reason}`,
+      },
+    });
+
+    await prisma.auditEvent.create({
+      data: {
+        requestId: signer.requestId,
+        signerId: signer.id,
+        action: "SENT",
+        details: `${oldName} reassigned signing responsibility to ${newName} (${signer.role}). Reason: ${reason}`,
+        ipAddress: ip,
+        userAgent: ua,
+      },
+    });
+
+    // Dispatch invitation to new recipient
+    const settings = await prisma.companySettings.findUnique({ where: { id: "default" } });
+    const rawBaseUrl =
+      signer.request.organization?.publicBaseUrl?.trim() ||
+      settings?.publicBaseUrl?.trim() ||
+      req.headers.get("origin") ||
+      "http://localhost:3030";
+    const baseUrl = rawBaseUrl.replace(/\/+$/, "");
+    const signUrl = `${baseUrl}/s/${newToken}`;
+
+    await dispatchInvite({
+      signerId: signer.id,
+      requestId: signer.requestId,
+      name: newName,
+      email: newEmail,
+      phone: newPhone,
+      channels: signer.channels ? signer.channels.split(",") : ["WHATSAPP", "EMAIL"],
+      documentTitle: signer.request.title,
+      projectName: signer.request.projectName,
+      message: `Document reassigned to you by ${oldName}. Note: ${reason}`,
+      signUrl,
+    });
+
+    return NextResponse.json({ success: true, status: "REASSIGNED", signUrl });
+  }
 
   // Action: Verify Access Passcode / PIN for confidential documents
   if (body.action === "VERIFY_PASSCODE") {

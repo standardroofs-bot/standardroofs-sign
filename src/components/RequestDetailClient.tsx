@@ -271,13 +271,23 @@ export default function RequestDetailClient({
             Original PDF
           </a>
           {request.hasSignedPdf && (
-            <a
-              href={`/api/requests/${request.id}/pdf?variant=signed&download=1`}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Download Signed PDF + Certificate
-            </a>
+            <>
+              <a
+                href={`/api/requests/${request.id}/pdf?variant=certificate&download=1`}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 text-xs font-semibold"
+                title="Download Section 65B Certificate & ID annexures only"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                Certificate Only
+              </a>
+              <a
+                href={`/api/requests/${request.id}/pdf?variant=signed&download=1`}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Full Signed Package
+              </a>
+            </>
           )}
           {request.status !== "COMPLETED" && request.status !== "VOIDED" && (
             <button

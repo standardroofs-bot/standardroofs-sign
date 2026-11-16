@@ -135,6 +135,8 @@ export async function POST(req: Request) {
     const accessPasscode = body.accessPasscode ? String(body.accessPasscode).trim() : null;
     const requiredAttachments = Array.isArray(body.requiredAttachments) ? body.requiredAttachments : [];
     const requiredAttachmentsJson = JSON.stringify(requiredAttachments);
+    const expiryDays = Math.max(1, Math.min(180, Number(body.expiryDays) || 14));
+    const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
 
     const orgUrl = user.activeOrg.publicBaseUrl?.trim() || "";
     const settingsUrl = settings?.publicBaseUrl?.trim() || "";
@@ -192,7 +194,7 @@ export async function POST(req: Request) {
             isConfidential,
             accessPasscode,
             requiredAttachmentsJson,
-            expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+            expiresAt,
             originalPdfPath: copiedPdf.relativePath,
             fileSizeBytes: copiedPdf.sizeBytes,
             originalHash: copiedPdf.hash,
@@ -310,7 +312,7 @@ export async function POST(req: Request) {
         isConfidential,
         accessPasscode,
         requiredAttachmentsJson,
-        expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        expiresAt,
         originalPdfPath: copiedPdf.relativePath,
         fileSizeBytes: copiedPdf.sizeBytes,
         originalHash: copiedPdf.hash,

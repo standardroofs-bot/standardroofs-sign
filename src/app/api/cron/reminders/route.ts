@@ -29,13 +29,13 @@ export async function POST(req: Request) {
     for (const exp of expiredRequests) {
       await prisma.signatureRequest.update({
         where: { id: exp.id },
-        data: { status: "VOIDED" },
+        data: { status: "EXPIRED" },
       });
       await prisma.auditEvent.create({
         data: {
           requestId: exp.id,
           action: "VOIDED",
-          details: `Document automatically expired after deadline.`,
+          details: `Document automatically expired after signing deadline.`,
           seenByAdmin: false,
         },
       });

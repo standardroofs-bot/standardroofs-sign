@@ -21,6 +21,9 @@ import {
   Camera,
   FileCheck,
   AlertCircle,
+  XCircle,
+  UserCheck,
+  Calendar,
 } from "lucide-react";
 import type { DocumentField } from "@/lib/types";
 
@@ -39,6 +42,7 @@ interface SigningSessionData {
     status: string;
     signedAt: string | null;
     passcodeVerified?: boolean;
+    declinedReason?: string | null;
   };
   request: {
     id: string;
@@ -47,6 +51,9 @@ interface SigningSessionData {
     category: string;
     message: string;
     status: string;
+    declinedReason?: string | null;
+    expiresAt?: string | null;
+    isExpired?: boolean;
     requirePhotoLocation?: boolean;
     isConfidential?: boolean;
     requiresPasscode?: boolean;
@@ -85,6 +92,14 @@ export default function SignDocumentPage({
   const [verifyingPasscode, setVerifyingPasscode] = useState(false);
   const [passcodeError, setPasscodeError] = useState("");
   const [showPasscodeText, setShowPasscodeText] = useState(false);
+  const [showDeclineModal, setShowDeclineModal] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [declining, setDeclining] = useState(false);
+
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignForm, setReassignForm] = useState({ name: "", email: "", phone: "", reason: "" });
+  const [reassigning, setReassigning] = useState(false);
+
   const [attachments, setAttachments] = useState<
     Array<{ id: string; label: string; name?: string; dataUrl: string }>
   >([]);
@@ -159,6 +174,58 @@ export default function SignDocumentPage({
       setPasscodeError("Network error. Please try again.");
     } finally {
       setVerifyingPasscode(false);
+    }
+  }
+
+  async function handleDecline() {
+    if (!declineReason.trim()) {
+      setError("Please provide a reason for declining.");
+      return;
+    }
+    setDeclining(true);
+    try {
+      const res = await fetch(`/api/sign/${token}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "DECLINE_SIGNING", reason: declineReason.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Failed to decline.");
+        return;
+      }
+      setShowDeclineModal(false);
+      await loadSession();
+    } catch {
+      setError("Network error declining document.");
+    } finally {
+      setDeclining(false);
+    }
+  }
+
+  async function handleReassign() {
+    if (!reassignForm.name.trim() || (!reassignForm.email.trim() && !reassignForm.phone.trim())) {
+      setError("Please provide Name and either Email or Phone for the new signer.");
+      return;
+    }
+    setReassigning(true);
+    try {
+      const res = await fetch(`/api/sign/${token}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "REASSIGN_SIGNER", ...reassignForm }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Failed to reassign.");
+        return;
+      }
+      setShowReassignModal(false);
+      await loadSession();
+    } catch {
+      setError("Network error reassigning document.");
+    } finally {
+      setReassigning(false);
     }
   }
 
@@ -330,8 +397,11 @@ export default function SignDocumentPage({
 
   const isCompleted = data.request.status === "COMPLETED";
   const isVoided = data.request.status === "VOIDED";
+  const isDeclined = data.request.status === "DECLINED" || data.signer.status === "DECLINED";
+  const isExpired = Boolean(data.request.isExpired);
   const isWaiting = data.signer.status === "WAITING";
   const alreadySigned = data.signer.status === "SIGNED";
+  const canAct = !alreadySigned && !isVoided && !isWaiting && !isDeclined && !isExpired;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
@@ -362,20 +432,38 @@ export default function SignDocumentPage({
                 Download Signed PDF
               </a>
             )}
-            {!alreadySigned && !isVoided && !isWaiting && (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-orange-700 hover:bg-orange-800 disabled:opacity-60 text-white text-xs sm:text-sm font-semibold cursor-pointer"
-              >
-                {submitting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4" />
-                )}
-                <span>Sign &amp; Submit</span>
-              </button>
+            {canAct && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowReassignModal(true)}
+                  className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Delegate</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeclineModal(true)}
+                  className="px-3 py-2 rounded-xl border border-red-900/60 bg-red-950/40 hover:bg-red-900/60 text-red-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Decline</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={submitting}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-orange-700 hover:bg-orange-800 disabled:opacity-60 text-white text-xs sm:text-sm font-semibold cursor-pointer shadow-sm transition"
+                >
+                  {submitting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4" />
+                  )}
+                  <span>Sign &amp; Submit</span>
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -465,7 +553,43 @@ export default function SignDocumentPage({
         {isVoided && (
           <div className="p-4 rounded-2xl bg-red-50 border border-red-200 flex items-center gap-3 text-red-800 text-sm">
             <AlertTriangle className="w-5 h-5 shrink-0" />
-            <span>This signature request has been voided by Standard Roofs.</span>
+            <span>This signature request has been voided by the sender.</span>
+          </div>
+        )}
+
+        {isDeclined && (
+          <div className="p-4 rounded-2xl bg-red-50 border-2 border-red-200 flex items-start gap-3 text-red-900 text-sm">
+            <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">This Signature Request Was Declined</div>
+              <p className="text-xs text-red-800 mt-0.5">
+                {data.request.declinedReason || data.signer.declinedReason || "The signer declined to sign this document."}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isExpired && (
+          <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-200 flex items-start gap-3 text-amber-900 text-sm">
+            <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">This Document Has Expired</div>
+              <p className="text-xs text-amber-800 mt-0.5">
+                The signing deadline for this document has passed. Please contact the sender to generate a new signing link.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {canAct && data.request.expiresAt && (
+          <div className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs text-slate-600">
+            <span className="flex items-center gap-1.5 font-medium">
+              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              Signing Deadline: {new Date(data.request.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            </span>
+            <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+              Active Request
+            </span>
           </div>
         )}
 
@@ -706,6 +830,130 @@ export default function SignDocumentPage({
           }}
         />
       </main>
+
+      {/* Decline to Sign Modal */}
+      {showDeclineModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl border border-slate-200">
+            <div className="flex items-center gap-2.5 text-red-700">
+              <XCircle className="w-6 h-6" />
+              <h3 className="font-bold text-base text-slate-900">Decline to Sign</h3>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              If terms are incorrect or you are unable to sign, you can decline. The sender will be notified immediately with your feedback.
+            </p>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                Reason for Declining <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                rows={3}
+                value={declineReason}
+                onChange={(e) => setDeclineReason(e.target.value)}
+                placeholder="E.g. Payment terms in Clause 4 are incorrect; need revision."
+                className="w-full p-3 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-red-500 focus:outline-hidden"
+              />
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={handleDecline}
+                disabled={declining || !declineReason.trim()}
+                className="flex-1 py-2.5 rounded-xl bg-red-700 hover:bg-red-800 disabled:opacity-50 text-white font-bold text-xs shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {declining ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+                Confirm Decline
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDeclineModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reassign Signer Modal */}
+      {showReassignModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl border border-slate-200">
+            <div className="flex items-center gap-2.5 text-indigo-700">
+              <UserCheck className="w-6 h-6" />
+              <h3 className="font-bold text-base text-slate-900">Delegate / Reassign Signer</h3>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Forward this document to another authorized person in your organization to sign on your behalf.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  New Signer Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={reassignForm.name}
+                  onChange={(e) => setReassignForm({ ...reassignForm, name: e.target.value })}
+                  placeholder="e.g. Ramesh Chandran"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={reassignForm.email}
+                    onChange={(e) => setReassignForm({ ...reassignForm, email: e.target.value })}
+                    placeholder="name@company.com"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Phone / WhatsApp</label>
+                  <input
+                    type="tel"
+                    value={reassignForm.phone}
+                    onChange={(e) => setReassignForm({ ...reassignForm, phone: e.target.value })}
+                    placeholder="+91 98765 43210"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Note / Reason</label>
+                <input
+                  type="text"
+                  value={reassignForm.reason}
+                  onChange={(e) => setReassignForm({ ...reassignForm, reason: e.target.value })}
+                  placeholder="e.g. Ramesh is the authorized managing director"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={handleReassign}
+                disabled={reassigning || !reassignForm.name.trim() || (!reassignForm.email.trim() && !reassignForm.phone.trim())}
+                className="flex-1 py-2.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white font-bold text-xs shadow-sm transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {reassigning ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4" />}
+                Send to New Signer
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowReassignModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SignaturePadModal
         isOpen={Boolean(activeSigField)}
