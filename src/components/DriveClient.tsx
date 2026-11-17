@@ -170,23 +170,23 @@ export default function DriveClient({
       )}
 
       {/* Main Drive Overview & Quota Meters */}
-      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+      <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-800 border border-red-200 flex items-center justify-center shadow-xs">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center justify-center shadow-xs">
               <HardDrive className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-slate-900">
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                   {orgName} — Cloud Storage &amp; Usage
                 </h1>
-                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 uppercase tracking-wide">
+                <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200/60 uppercase tracking-wide">
                   {currentTier}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                All templates, original documents, and cryptographically sealed audit PDFs.
+              <p className="text-xs text-slate-500 mt-1">
+                Real-time storage metering for all templates, uploaded contracts, and cryptographically sealed Section 65B audit PDFs.
               </p>
             </div>
           </div>
@@ -195,10 +195,10 @@ export default function DriveClient({
         {/* Meters Grid: Document Cap + Storage Quota */}
         <div className="grid md:grid-cols-2 gap-4">
           {/* Meter 1: Monthly Document Quota */}
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                <FileText className="w-4 h-4 text-red-700" />
+                <FileText className="w-4 h-4 text-indigo-600" />
                 Monthly Documents Quota
               </div>
               <div className="text-xs font-bold text-slate-900">
@@ -214,30 +214,30 @@ export default function DriveClient({
               </div>
             </div>
 
-            <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all ${
                   docLimit === -1
                     ? "bg-emerald-600 w-full"
                     : docPct >= 90
-                    ? "bg-red-600"
-                    : "bg-red-800"
+                    ? "bg-rose-600"
+                    : "bg-indigo-600"
                 }`}
                 style={{ width: docLimit === -1 ? "100%" : `${Math.max(docPct, docsSent > 0 ? 5 : 0)}%` }}
               />
             </div>
 
             <div className="text-[11px] text-slate-500 flex justify-between">
-              <span>{docLimit === -1 ? "Business Pro tier active" : `${10 - docsSent} free documents remaining`}</span>
-              {docLimit !== -1 && <span className="font-semibold text-red-700">10 docs/month cap</span>}
+              <span>{docLimit === -1 ? "Business Pro tier active" : `${Math.max(0, docLimit - docsSent)} free documents remaining`}</span>
+              {docLimit !== -1 && <span className="font-semibold text-indigo-700">{docLimit} docs/month cap</span>}
             </div>
           </div>
 
           {/* Meter 2: Cloud Storage Capacity */}
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                <HardDrive className="w-4 h-4 text-red-700" />
+                <HardDrive className="w-4 h-4 text-indigo-600" />
                 Cloud Drive Storage
               </div>
               <div className="text-xs font-bold text-slate-900">
@@ -245,10 +245,10 @@ export default function DriveClient({
               </div>
             </div>
 
-            <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all ${
-                  storagePct >= 90 ? "bg-red-600" : "bg-red-800"
+                  storagePct >= 90 ? "bg-rose-600" : "bg-indigo-600"
                 }`}
                 style={{ width: `${Math.max(storagePct, used > 0 ? 3 : 0)}%` }}
               />
@@ -265,7 +265,7 @@ export default function DriveClient({
         <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-              <Zap className="w-4 h-4 text-red-700" />
+              <Zap className="w-4 h-4 text-indigo-600" />
               Available Commercial Tiers &amp; Drive Quotas
             </h2>
             <span className="text-xs text-slate-500">
@@ -284,9 +284,9 @@ export default function DriveClient({
                   key={p.id}
                   className={`p-4 rounded-2xl border transition-all flex flex-col justify-between ${
                     isCurrent
-                      ? "border-red-700 bg-red-50/40 shadow-xs ring-1 ring-red-700/20"
+                      ? "border-indigo-600 bg-indigo-50/40 shadow-xs ring-1 ring-indigo-600/20"
                       : isPro
-                      ? "border-slate-300 hover:border-slate-400 bg-white"
+                      ? "border-indigo-200 hover:border-indigo-300 bg-white"
                       : "border-slate-200 hover:border-slate-300 bg-white"
                   }`}
                 >
@@ -294,11 +294,11 @@ export default function DriveClient({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-900">{p.name}</span>
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
                           isCurrent
-                            ? "bg-red-700 text-white"
+                            ? "bg-indigo-600 text-white"
                             : isPro
-                            ? "bg-blue-100 text-blue-800"
+                            ? "bg-indigo-100 text-indigo-800"
                             : isEnt
                             ? "bg-purple-100 text-purple-800"
                             : "bg-slate-100 text-slate-600"
@@ -310,7 +310,7 @@ export default function DriveClient({
 
                     <div>
                       <div className="text-lg font-black text-slate-900">{p.priceLabel}</div>
-                      <div className="text-xs text-red-700 font-semibold mt-0.5">
+                      <div className="text-xs text-indigo-700 font-semibold mt-0.5">
                         {p.storageLabel} Storage • {p.monthlyDocLimit === -1 ? "Unlimited Docs" : "10 Docs/mo"}
                       </div>
                     </div>
@@ -330,9 +330,9 @@ export default function DriveClient({
                       <button
                         type="button"
                         disabled
-                        className="w-full py-2 rounded-xl bg-red-100 text-red-800 text-xs font-bold flex items-center justify-center gap-1.5 cursor-default"
+                        className="w-full py-2.5 rounded-xl bg-indigo-100 text-indigo-800 text-xs font-bold flex items-center justify-center gap-1.5 cursor-default"
                       >
-                        <CheckCircle2 className="w-4 h-4" />
+                        <CheckCircle2 className="w-4 h-4 text-indigo-600" />
                         Current Plan
                       </button>
                     ) : (
@@ -340,12 +340,12 @@ export default function DriveClient({
                         type="button"
                         onClick={() => handleUpgrade(p.id)}
                         disabled={upgradingTier !== null}
-                        className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                           isPro
-                            ? "bg-red-700 hover:bg-red-800 text-white shadow-xs"
+                            ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-600/20"
                             : isEnt
-                            ? "bg-purple-800 hover:bg-purple-900 text-white shadow-xs"
-                            : "bg-slate-900 hover:bg-slate-800 text-white"
+                            ? "bg-purple-700 hover:bg-purple-800 text-white shadow-sm shadow-purple-700/20"
+                            : "bg-slate-900 hover:bg-slate-800 text-white shadow-xs"
                         }`}
                       >
                         {upgradingTier === p.id ? (
@@ -367,26 +367,26 @@ export default function DriveClient({
       </div>
 
       {/* File Browser & PDF Downloader */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-        <div className="p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-xs">
+        <div className="p-5 border-b border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
           <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
-            <Layers className="w-4 h-4 text-red-700" />
+            <Layers className="w-4 h-4 text-indigo-600" />
             Stored Cloud Documents ({filtered.length})
           </div>
           <div className="relative max-w-xs w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search files in Drive..."
-              className="w-full pl-9 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-hidden focus:ring-2 focus:ring-red-700/20"
+              className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600/20 shadow-2xs"
             />
           </div>
         </div>
 
         {filtered.length === 0 ? (
-          <div className="p-12 text-center text-sm text-slate-500">
+          <div className="p-14 text-center text-xs text-slate-500">
             No files in Cloud Drive yet. Upload templates or send documents to start saving.
           </div>
         ) : (
@@ -394,16 +394,18 @@ export default function DriveClient({
             {filtered.map((f) => (
               <div
                 key={`${f.kind}-${f.id}`}
-                className="p-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 transition"
+                className="p-4 flex items-center justify-between gap-3 hover:bg-slate-50 transition"
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <FileText className="w-5 h-5 text-red-800 shrink-0" />
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100/80 text-indigo-700 flex items-center justify-center shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-900 truncate">
+                    <div className="text-sm font-bold text-slate-900 truncate">
                       {f.name}
                     </div>
                     <div className="text-xs text-slate-500 flex gap-2">
-                      <span className="font-semibold text-slate-700">{f.kind}</span>
+                      <span className="font-semibold text-indigo-700">{f.kind}</span>
                       {f.sizeBytes > 0 && <span>• {formatBytes(f.sizeBytes)}</span>}
                       <span>• {new Date(f.createdAt).toLocaleDateString()}</span>
                     </div>

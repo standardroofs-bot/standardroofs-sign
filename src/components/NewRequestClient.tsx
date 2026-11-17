@@ -221,7 +221,7 @@ export default function NewRequestClient({
         </p>
         <Link
           href="/templates"
-          className="inline-block mt-4 px-4 py-2 rounded-lg bg-red-800 text-white text-sm font-semibold hover:bg-red-900"
+          className="inline-block mt-4 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 shadow-xs transition"
         >
           Upload Document →
         </Link>
@@ -406,7 +406,7 @@ export default function NewRequestClient({
                 key={`${signer.role}-${idx}`}
                 className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2.5"
               >
-                <div className="text-xs font-bold text-red-800 uppercase">
+                <div className="text-xs font-bold text-indigo-700 uppercase">
                   {signer.role}
                 </div>
                 <div className="grid sm:grid-cols-3 gap-2.5">
@@ -493,7 +493,7 @@ export default function NewRequestClient({
                 id: "EMAIL",
                 label: "Email",
                 icon: Mail,
-                activeCls: "bg-red-50 border-red-700 text-red-900",
+                activeCls: "bg-indigo-50 border-indigo-600 text-indigo-900",
               },
               {
                 id: "SMS",
@@ -738,7 +738,7 @@ export default function NewRequestClient({
         <button
           type="submit"
           disabled={submitting}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-red-800 hover:bg-red-900 disabled:opacity-60 text-white font-semibold text-sm cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 py-3 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold text-sm cursor-pointer shadow-md shadow-indigo-600/20 transition"
         >
           {submitting ? (
             <Loader2 className="w-4 h-4 animate-spin" />

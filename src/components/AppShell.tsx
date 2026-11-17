@@ -18,6 +18,8 @@ import {
   Plus,
   ChevronDown,
   Sparkles,
+  Shield,
+  ExternalLink,
 } from "lucide-react";
 
 interface NotificationEvent {
@@ -106,10 +108,10 @@ export default function AppShell({ user, children }: AppShellProps) {
   }
 
   const navItems = [
-    { href: "/dashboard", label: "Submissions", icon: LayoutDashboard },
-    { href: "/templates", label: "Documents", icon: Files },
+    { href: "/dashboard", label: "Agreements", icon: LayoutDashboard },
+    { href: "/templates", label: "Templates", icon: Files },
     { href: "/requests/new", label: "Send", icon: Send },
-    { href: "/drive", label: "Drive", icon: HardDrive },
+    { href: "/drive", label: "Cloud Drive", icon: HardDrive },
     { href: "/editor", label: "PDF Editor", icon: FileEdit },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
@@ -120,146 +122,189 @@ export default function AppShell({ user, children }: AppShellProps) {
     router.refresh();
   }
 
+  // Get user avatar initials
+  const initials = user.name
+    .split(" ")
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "US";
+
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-2xs">
-        <div className="h-1 bg-red-800 w-full" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-red-800 flex items-center justify-center shadow-xs">
-                <FileSignature className="w-4 h-4 text-white" />
+    <div className="min-h-screen flex flex-col bg-slate-50/70 antialiased font-sans">
+      {/* Top Navbar */}
+      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-30 transition-all shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          {/* Left: Brand + Workspace Switcher */}
+          <div className="flex items-center gap-3 sm:gap-5">
+            {/* Logo */}
+            <Link href="/dashboard" className="flex items-center gap-2.5 group">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-slate-900 via-indigo-950 to-indigo-800 flex items-center justify-center shadow-sm shadow-indigo-900/20 group-hover:scale-105 transition-transform">
+                <FileSignature className="w-5 h-5 text-indigo-200" />
               </div>
               <div className="leading-tight hidden sm:block">
-                <div className="font-bold text-sm text-slate-900 tracking-tight">
-                  Standard <span className="text-red-800">e-Sign</span>
+                <div className="font-extrabold text-sm text-slate-900 tracking-tight flex items-center gap-1.5">
+                  Standard <span className="text-indigo-600 font-black">e-Sign</span>
+                </div>
+                <div className="text-[10px] text-slate-600 font-semibold tracking-wide">
+                  Enterprise Platform
                 </div>
               </div>
             </Link>
 
-            {/* Organization Switcher */}
+            <div className="h-5 w-px bg-slate-200 hidden sm:block" />
+
+            {/* Workspace Switcher */}
             {user.activeOrg && (
               <div className="relative">
                 <button
                   type="button"
                   onClick={() => setOrgOpen((v) => !v)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-800 cursor-pointer"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200/90 bg-slate-50/80 hover:bg-slate-100/90 hover:border-slate-300 text-xs font-semibold text-slate-800 transition-all cursor-pointer shadow-2xs"
                 >
-                  <Building2 className="w-3.5 h-3.5 text-red-800" />
-                  <span className="max-w-[130px] truncate">
+                  <div className="w-5 h-5 rounded-md bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-[10px]">
+                    {user.activeOrg.name[0]?.toUpperCase() || "O"}
+                  </div>
+                  <span className="max-w-[130px] truncate text-slate-800 font-semibold">
                     {user.activeOrg.name}
                   </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-600" />
                 </button>
 
                 {orgOpen && (
-                  <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden">
-                    <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase text-slate-500">
-                      Organizations
+                  <div className="absolute left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-1">
+                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                        Organizations &amp; Workspaces
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 font-semibold text-slate-600">
+                        {user.organizations?.length || 1}
+                      </span>
                     </div>
-                    <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
-                      {(user.organizations || []).map((org) => (
-                        <button
-                          key={org.id}
-                          type="button"
-                          onClick={() => switchOrg(org.id)}
-                          className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-slate-50 cursor-pointer ${
-                            org.id === user.activeOrg?.id
-                              ? "bg-red-50/50 font-bold text-red-900"
-                              : "text-slate-700"
-                          }`}
-                        >
-                          <span className="truncate">{org.name}</span>
-                          <span className="text-[10px] text-slate-400">
-                            {org.role}
-                          </span>
-                        </button>
-                      ))}
+                    <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto p-1.5">
+                      {(user.organizations || []).map((org) => {
+                        const isCurrent = org.id === user.activeOrg?.id;
+                        return (
+                          <button
+                            key={org.id}
+                            type="button"
+                            onClick={() => switchOrg(org.id)}
+                            className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition cursor-pointer ${
+                              isCurrent
+                                ? "bg-indigo-50/90 font-bold text-indigo-900 border border-indigo-100"
+                                : "text-slate-700 hover:bg-slate-50 font-medium"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div
+                                className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold ${
+                                  isCurrent
+                                    ? "bg-indigo-600 text-white"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {org.name[0]?.toUpperCase()}
+                              </div>
+                              <span className="truncate">{org.name}</span>
+                            </div>
+                            <span className="text-[10px] uppercase font-bold text-slate-600 px-1.5 py-0.5 rounded bg-white/80 border border-slate-200/60">
+                              {org.role}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
-                    <button
-                      type="button"
-                      onClick={createNewOrg}
-                      className="w-full px-3 py-2.5 bg-slate-50 hover:bg-slate-100 border-t border-slate-200 text-xs font-semibold text-red-800 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Create New Organization
-                    </button>
+                    <div className="p-1.5 bg-slate-50 border-t border-slate-200">
+                      <button
+                        type="button"
+                        onClick={createNewOrg}
+                        className="w-full px-3 py-2 rounded-xl bg-white hover:bg-indigo-50 border border-slate-200 text-xs font-semibold text-indigo-700 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-2xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Create New Workspace
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Platform Super Admin Badge & Link */}
+            {/* Super Admin Command Center Pill */}
             {user.role === "SUPER_ADMIN" && (
               <Link
                 href="/admin"
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs ${
                   pathname.startsWith("/admin")
-                    ? "bg-amber-500 text-slate-900 border border-amber-600 shadow-xs"
-                    : "bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200"
+                    ? "bg-slate-950 text-amber-300 border border-amber-400/40 shadow-xs"
+                    : "bg-slate-900 hover:bg-slate-950 text-amber-300 border border-slate-800"
                 }`}
+                title="Super Admin Platform Command Center"
               >
-                <Sparkles className="w-3.5 h-3.5 text-amber-700" />
-                <span>Super Admin</span>
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden md:inline">Command Center</span>
+                <span className="md:hidden">Admin</span>
               </Link>
             )}
-
-            <nav className="hidden lg:flex items-center gap-1">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active =
-                  item.href === "/dashboard"
-                    ? pathname === "/dashboard" ||
-                      (pathname.startsWith("/requests/") &&
-                        pathname !== "/requests/new")
-                    : pathname.startsWith(item.href);
-
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${
-                      active
-                        ? "bg-red-800 text-white"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-            </nav>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Center: Desktop Navigation Tabs */}
+          <nav className="hidden lg:flex items-center gap-1 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/60 shadow-inner">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active =
+                item.href === "/dashboard"
+                  ? pathname === "/dashboard" ||
+                    (pathname.startsWith("/requests/") &&
+                      pathname !== "/requests/new")
+                  : pathname.startsWith(item.href);
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    active
+                      ? "bg-white text-slate-950 shadow-xs border border-slate-200/80 font-bold"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 ${active ? "text-indigo-600" : "text-slate-600"}`} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* Right: Notifications & User Profile */}
+          <div className="flex items-center gap-2.5">
             {/* Notification Bell */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setNotifOpen((v) => !v)}
-                className="relative p-2 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                title="Document Activity Notifications"
+                className="relative p-2 rounded-xl border border-slate-200 hover:bg-slate-100/80 text-slate-700 transition cursor-pointer"
+                title="Activity Alerts"
               >
-                <Bell className="w-4 h-4" />
+                <Bell className="w-4 h-4 text-slate-600" />
                 {unread > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-red-700 text-white text-[10px] font-bold flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-indigo-600 text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
                     {unread}
                   </span>
                 )}
               </button>
 
               {notifOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden">
-                  <div className="px-3.5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-1">
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-800">
-                      Activity &amp; Alerts
+                      Recent Activity &amp; Signatures
                     </span>
                     {unread > 0 && (
                       <button
                         type="button"
                         onClick={markAllRead}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-red-800 hover:underline cursor-pointer"
+                        className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:underline cursor-pointer"
                       >
                         <CheckCheck className="w-3.5 h-3.5" />
                         Mark read
@@ -268,8 +313,8 @@ export default function AppShell({ user, children }: AppShellProps) {
                   </div>
                   <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
                     {events.length === 0 ? (
-                      <div className="p-4 text-xs text-slate-500 text-center">
-                        No activity yet. Opens &amp; signatures appear here.
+                      <div className="p-6 text-xs text-slate-600 text-center">
+                        No activity yet. Signed contracts &amp; opens appear here.
                       </div>
                     ) : (
                       events.map((ev) => (
@@ -277,25 +322,25 @@ export default function AppShell({ user, children }: AppShellProps) {
                           key={ev.id}
                           href={`/requests/${ev.request.id}`}
                           onClick={() => setNotifOpen(false)}
-                          className={`block px-3.5 py-2.5 hover:bg-slate-50 ${
-                            !ev.seenByAdmin ? "bg-red-50/40" : ""
+                          className={`block px-4 py-3 hover:bg-slate-50 transition ${
+                            !ev.seenByAdmin ? "bg-indigo-50/40" : ""
                           }`}
                         >
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="font-bold text-red-800">
+                          <div className="flex items-center justify-between text-[11px] mb-0.5">
+                            <span className="font-bold text-indigo-700">
                               {ev.action}
                             </span>
-                            <span className="text-slate-400">
+                            <span className="text-slate-400 text-[10px]">
                               {new Date(ev.createdAt).toLocaleTimeString([], {
                                 hour: "2-digit",
                                 minute: "2-digit",
                               })}
                             </span>
                           </div>
-                          <div className="text-xs font-medium text-slate-800 truncate">
+                          <div className="text-xs font-semibold text-slate-900 truncate">
                             {ev.request.title}
                           </div>
-                          <div className="text-[11px] text-slate-500 truncate">
+                          <div className="text-[11px] text-slate-500 truncate mt-0.5">
                             {ev.details}
                           </div>
                         </Link>
@@ -306,25 +351,34 @@ export default function AppShell({ user, children }: AppShellProps) {
               )}
             </div>
 
-            <div className="hidden sm:block text-right pl-1">
-              <div className="text-xs font-semibold text-slate-900 leading-tight">
-                {user.name}
+            {/* User Profile Avatar & Details */}
+            <div className="flex items-center gap-2 pl-1 border-l border-slate-200">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-slate-900 to-indigo-900 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                {initials}
               </div>
-              <div className="text-[11px] text-slate-500">{user.title}</div>
+              <div className="hidden sm:block text-left">
+                <div className="text-xs font-bold text-slate-900 leading-tight">
+                  {user.name}
+                </div>
+                <div className="text-[10px] text-slate-600 font-medium leading-none mt-0.5">
+                  {user.title}
+                </div>
+              </div>
             </div>
+
+            {/* Logout Button */}
             <button
               onClick={handleLogout}
               title="Sign Out"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium transition cursor-pointer"
+              className="p-2 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200/80 transition cursor-pointer"
             >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logout</span>
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Mobile / Tablet Nav */}
-        <div className="lg:hidden border-t border-slate-200 px-3 py-1.5 flex items-center gap-1 overflow-x-auto bg-slate-50">
+        {/* Mobile / Tablet Horizontal Bar */}
+        <div className="lg:hidden border-t border-slate-200 px-3 py-2 flex items-center gap-1.5 overflow-x-auto bg-slate-50/90">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active =
@@ -335,8 +389,10 @@ export default function AppShell({ user, children }: AppShellProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap ${
-                  active ? "bg-red-800 text-white" : "text-slate-600"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
+                  active
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "text-slate-600 hover:bg-white bg-white/60 border border-slate-200/60"
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
@@ -347,7 +403,8 @@ export default function AppShell({ user, children }: AppShellProps) {
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+      {/* Main App Canvas */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {children}
       </main>
     </div>

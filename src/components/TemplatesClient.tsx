@@ -126,8 +126,8 @@ export default function TemplatesClient({
           className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-xs"
         >
           <div className="flex items-center gap-2 font-semibold text-slate-900">
-            <Upload className="w-5 h-5 text-orange-700" />
-            <span>Upload New PDF Template</span>
+            <Upload className="w-5 h-5 text-indigo-600" />
+            <span>Upload New Document Template</span>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-3">
@@ -139,19 +139,19 @@ export default function TemplatesClient({
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Kerala Tile Roofing BOQ"
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-600"
+                placeholder="e.g. Master Services Agreement / NDA"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Roofing Category
+                Agreement Category
               </label>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value as DocumentCategory)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-orange-600"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
               >
                 {Object.entries(CATEGORY_LABELS).map(([k, label]) => (
                   <option key={k} value={k}>
@@ -162,7 +162,7 @@ export default function TemplatesClient({
             </div>
           </div>
 
-          <label className="block border-2 border-dashed border-slate-300 hover:border-orange-600 rounded-xl p-5 text-center cursor-pointer bg-slate-50 transition">
+          <label className="block border-2 border-dashed border-slate-300 hover:border-indigo-600 rounded-xl p-5 text-center cursor-pointer bg-slate-50 transition">
             <input
               type="file"
               accept=".pdf,.docx,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
@@ -200,7 +200,7 @@ export default function TemplatesClient({
           <button
             type="submit"
             disabled={creating}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-orange-700 hover:bg-orange-800 disabled:opacity-60 text-white text-sm font-semibold cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold cursor-pointer shadow-sm shadow-indigo-600/20"
           >
             {creating ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -214,7 +214,7 @@ export default function TemplatesClient({
         {/* Quick Starter Templates */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-4 shadow-xs">
           <div className="flex items-center gap-2 font-semibold text-slate-900">
-            <Sparkles className="w-5 h-5 text-orange-700" />
+            <Sparkles className="w-5 h-5 text-indigo-600" />
             <span>Quick-Start Contract Templates</span>
           </div>
           <p className="text-xs text-slate-500">
@@ -226,17 +226,17 @@ export default function TemplatesClient({
               type="button"
               disabled={creating}
               onClick={() => handleCreateSample("quotation", "QUOTATION_BOQ")}
-              className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-orange-600 hover:bg-orange-50/40 transition flex items-center justify-between cursor-pointer"
+              className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-indigo-600 hover:bg-indigo-50/40 transition flex items-center justify-between cursor-pointer"
             >
               <div>
                 <div className="text-sm font-semibold text-slate-900">
-                  Quotation &amp; BOQ Approval PDF
+                  Quotation &amp; Scope Approval Agreement
                 </div>
                 <div className="text-xs text-slate-500">
-                  Clay/Concrete Tiles, Steel Truss &amp; Payment Terms
+                  Commercial proposal, milestones &amp; payment schedule
                 </div>
               </div>
-              <span className="text-xs font-semibold text-orange-700">
+              <span className="text-xs font-semibold text-indigo-600">
                 Create →
               </span>
             </button>
@@ -247,17 +247,17 @@ export default function TemplatesClient({
               onClick={() =>
                 handleCreateSample("fabrication", "FABRICATION_DRAWING")
               }
-              className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-orange-600 hover:bg-orange-50/40 transition flex items-center justify-between cursor-pointer"
+              className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-indigo-600 hover:bg-indigo-50/40 transition flex items-center justify-between cursor-pointer"
             >
               <div>
                 <div className="text-sm font-semibold text-slate-900">
-                  Structural &amp; Truss Fabrication Drawing Sign-Off
+                  Technical Specifications &amp; Drawing Sign-Off
                 </div>
                 <div className="text-xs text-slate-500">
-                  Workshop cutting &amp; IS 4923 hollow steel specs approval
+                  Engineering tolerances, material specs &amp; deliverables
                 </div>
               </div>
-              <span className="text-xs font-semibold text-orange-700">
+              <span className="text-xs font-semibold text-indigo-600">
                 Create →
               </span>
             </button>
@@ -268,17 +268,17 @@ export default function TemplatesClient({
               onClick={() =>
                 handleCreateSample("handover", "HANDOVER_CERTIFICATE")
               }
-              className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-orange-600 hover:bg-orange-50/40 transition flex items-center justify-between cursor-pointer"
+              className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-indigo-600 hover:bg-indigo-50/40 transition flex items-center justify-between cursor-pointer"
             >
               <div>
                 <div className="text-sm font-semibold text-slate-900">
-                  Site Measurement &amp; Project Handover Certificate
+                  Project Completion &amp; Handover Certificate
                 </div>
                 <div className="text-xs text-slate-500">
-                  Final Sq.Ft. check, water test &amp; 10-year warranty start
+                  Client acceptance, deliverables verification &amp; warranty seal
                 </div>
               </div>
-              <span className="text-xs font-semibold text-orange-700">
+              <span className="text-xs font-semibold text-indigo-600">
                 Create →
               </span>
             </button>
@@ -326,7 +326,7 @@ export default function TemplatesClient({
                   </Link>
                   <Link
                     href={`/requests/new?templateId=${t.id}`}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-700 hover:bg-orange-800 text-white text-xs font-semibold"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs"
                   >
                     <Send className="w-3.5 h-3.5" />
                     Send

@@ -145,7 +145,7 @@ export default function SettingsClient({
       {/* Company Branding & Gateways Form */}
       <form onSubmit={handleSaveSettings} className="bg-white p-6 rounded-2xl border border-slate-200 space-y-5 shadow-xs">
         <div className="font-bold text-slate-900 text-sm flex items-center gap-2 border-b border-slate-100 pb-3">
-          <Building className="w-4 h-4 text-red-700" />
+          <Building className="w-4 h-4 text-indigo-600" />
           1. Company Identity &amp; Contact Details
         </div>
 
@@ -296,7 +296,7 @@ export default function SettingsClient({
           <button
             type="submit"
             disabled={saving}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-800 hover:bg-red-900 text-white text-xs font-bold cursor-pointer transition shadow-xs"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer transition shadow-md shadow-indigo-600/20"
           >
             <Save className="w-4 h-4" />
             <span>{saving ? "Saving Changes..." : "Save Settings"}</span>
@@ -368,7 +368,7 @@ export default function SettingsClient({
         {canManageTeam && (
           <form onSubmit={handleInviteMember} className="pt-4 border-t border-slate-200 space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-              <UserPlus className="w-3.5 h-3.5 text-red-700" />
+              <UserPlus className="w-3.5 h-3.5 text-indigo-600" />
               Invite Staff / Team Member
             </div>
 
