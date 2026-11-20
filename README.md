@@ -88,7 +88,7 @@ Unlike generic signing apps, Standard e-Sign combines visual document manipulati
 ## 📦 Directory Structure
 
 ```
-standardroofs-sign/
+standard-esign/
 ├── docs/
 │   └── USER_GUIDE.md               # Complete A-to-Z End-to-End User Manual
 ├── prisma/
@@ -151,7 +151,7 @@ npm run dev
 ```
 Open **[http://localhost:3030](http://localhost:3030)** in your browser.
 
-* **Super Admin Login:** `admin@standardroofs.in` / `Welcome@2026` (or create your own on `/signup`).
+* **Super Admin Login:** `admin@standardesign.in` / `Welcome@2026` (or create your own on `/signup`).
 * **Super Admin Command Center:** [http://localhost:3030/admin](http://localhost:3030/admin).
 
 ---
@@ -220,5 +220,5 @@ Documents executed through Standard e-Sign are fully admissible in court:
 ## 📄 License & Intellectual Property
 
 Proprietary and Confidential Commercial Software.  
-Copyright © 2026 Invi Creation & Standard Roofs. All Rights Reserved.  
+Copyright © 2026 Srimani / Invi Creation. All Rights Reserved.  
 Unauthorized copying, reverse engineering, or redistribution of this repository is strictly prohibited.

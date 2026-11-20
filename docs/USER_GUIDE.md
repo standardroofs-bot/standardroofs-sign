@@ -292,7 +292,7 @@ Click **PDF Editor** in the navigation bar to use the built-in document manipula
 
 ## 13. Super Admin Command Center (Platform Owners Only)
 
-If your user account has the `SUPER_ADMIN` role (e.g., `admin@standardroofs.in`), an exclusive **👑 Super Admin** badge appears in the top navigation bar, linking to `/admin`.
+If your user account has the `SUPER_ADMIN` role (e.g., `admin@standardesign.in`), an exclusive **👑 Super Admin** badge appears in the top navigation bar, linking to `/admin`.
 
 ### What the Platform Owner Can Do:
 1. **Fleet Overview & Revenue KPIs:**

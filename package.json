@@ -1,8 +1,9 @@
 {
-  "name": "standardroofs-sign",
+  "name": "standard-esign",
   "version": "1.0.0",
   "private": true,
-  "description": "StandardRoofs Sign - Proprietary E-Signature & Fabrication Document Approval Platform for Standard Roofs",
+  "description": "Standard e-Sign - Enterprise Multi-Tenant Digital Signature, Biometric KYC Proofs & Section 65B Audit Trail SaaS Platform",
+  "author": "Srimani / Invi Creation",
   "scripts": {
     "dev": "next dev -p 3030",
     "build": "next build",
