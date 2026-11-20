@@ -1,6 +1,6 @@
-# Standard e-Sign ⚡
+# StandardRoofs Sign ⚡
 
-> **Enterprise-Grade Multi-Tenant Digital Signature, Biometric KYC Proofs & Section 65B Audit Trail SaaS Platform**
+> **Official Electronic Signature, Roofing Contracts & Document Approval Platform for Standard Roofs**
 
 [![Next.js 15](https://img.shields.io/badge/Next.js-15.5-black?style=flat&logo=next.js)](https://nextjs.org/)
 [![React 19](https://img.shields.io/badge/React-19.0-61dafb?style=flat&logo=react)](https://react.dev/)
@@ -220,5 +220,5 @@ Documents executed through Standard e-Sign are fully admissible in court:
 ## 📄 License & Intellectual Property
 
 Proprietary and Confidential Commercial Software.  
-Copyright © 2026 Srimani / Invi Creation. All Rights Reserved.  
+Copyright © 2026 Standard Roofs (https://github.com/standardroofs-bot). All Rights Reserved.  
 Unauthorized copying, reverse engineering, or redistribution of this repository is strictly prohibited.
